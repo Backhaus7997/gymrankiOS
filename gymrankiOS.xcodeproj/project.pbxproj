@@ -35,16 +35,6 @@
 			path = gymrankiOS;
 			sourceTree = "<group>";
 		};
-		2186B21C2F34D27300A7A2CA /* gymrankiOSTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = gymrankiOSTests;
-			sourceTree = "<group>";
-		};
-		2186B2262F34D27300A7A2CA /* gymrankiOSUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = gymrankiOSUITests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,8 +66,6 @@
 			isa = PBXGroup;
 			children = (
 				2186B20E2F34D27100A7A2CA /* gymrankiOS */,
-				2186B21C2F34D27300A7A2CA /* gymrankiOSTests */,
-				2186B2262F34D27300A7A2CA /* gymrankiOSUITests */,
 				2186B20D2F34D27100A7A2CA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -130,9 +118,6 @@
 			dependencies = (
 				2186B21B2F34D27300A7A2CA /* PBXTargetDependency */,
 			);
-			fileSystemSynchronizedGroups = (
-				2186B21C2F34D27300A7A2CA /* gymrankiOSTests */,
-			);
 			name = gymrankiOSTests;
 			packageProductDependencies = (
 			);
@@ -152,9 +137,6 @@
 			);
 			dependencies = (
 				2186B2252F34D27300A7A2CA /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				2186B2262F34D27300A7A2CA /* gymrankiOSUITests */,
 			);
 			name = gymrankiOSUITests;
 			packageProductDependencies = (
