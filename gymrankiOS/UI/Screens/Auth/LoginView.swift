@@ -21,7 +21,7 @@ struct LoginView: View {
                     Spacer().frame(height: 18)
 
                     VStack(spacing: 8) {
-                        Text("Gym Rank")
+                        Text("FITRANK")
                             .font(.system(size: 34, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
 
