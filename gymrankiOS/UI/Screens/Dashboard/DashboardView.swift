@@ -65,7 +65,7 @@ struct DashboardView: View {
 
             case .ranking:
                 TabScaffold(selectedTab: $selectedTab) {
-                    RankingView(bottomInset: 96)
+                    RankingView(bottomInset: 1)
                 }
             }
         }

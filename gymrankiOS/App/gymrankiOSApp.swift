@@ -6,15 +6,21 @@
 //
 
 import SwiftUI
+import FirebaseCore
 
 @main
 struct gymrankiOSApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @StateObject private var session = SessionManager()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(session)
         }
     }
 }
+
 
 private struct TitleBlock: View {
     var body: some View {
@@ -45,4 +51,3 @@ private struct SubtitleBlock: View {
         .padding(.horizontal, 32)
     }
 }
-

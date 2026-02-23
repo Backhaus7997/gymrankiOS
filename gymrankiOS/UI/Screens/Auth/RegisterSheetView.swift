@@ -2,12 +2,21 @@ import SwiftUI
 
 struct RegisterSheetView: View {
     @Environment(\.dismiss) private var dismiss
-
     let onCreated: () -> Void
 
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
+
+    @StateObject private var vm = AuthViewModel()
+    @State private var showErrorAlert = false
+
+    private var canSubmit: Bool {
+        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !e.isEmpty, !password.isEmpty, !confirmPassword.isEmpty else { return false }
+        guard password == confirmPassword else { return false }
+        return password.count >= 6
+    }
 
     var body: some View {
         ZStack {
@@ -46,20 +55,39 @@ struct RegisterSheetView: View {
                         text: $email,
                         leftIconSystemName: "envelope"
                     )
-                    AppSecureField(placeholder: "Contraseña", text: $password)
+
+                    AppSecureField(placeholder: "Contraseña (mín. 6)", text: $password)
+
                     AppSecureField(placeholder: "Confirmá tu contraseña", text: $confirmPassword)
                 }
                 .padding(.horizontal, 22)
 
                 Spacer().frame(height: 16)
 
-                PrimaryButton(title: "CREAR CUENTA") {
-                    dismiss()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        onCreated()
+                PrimaryButton(title: vm.isLoading ? "CREANDO..." : "CREAR CUENTA") {
+                    Task {
+                        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                        guard password == confirmPassword else {
+                            vm.errorMessage = "Las contraseñas no coinciden."
+                            showErrorAlert = true
+                            return
+                        }
+
+                        await vm.register(email: e, password: password)
+
+                        if vm.errorMessage != nil {
+                            showErrorAlert = true
+                        } else {
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                onCreated()
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 22)
+                .disabled(!canSubmit || vm.isLoading)
 
                 Spacer().frame(height: 14)
 
@@ -69,8 +97,14 @@ struct RegisterSheetView: View {
                 Spacer().frame(height: 14)
 
                 HStack(spacing: 14) {
-                    SocialButton(title: "Google") { }
-                    SocialButton(title: "Apple") { }
+                    SocialButton(
+                        title: vm.isLoading ? "Google..." : "Google"
+                    ) {
+                        Task {
+                            await signUpWithGoogle()
+                        }
+                    }
+                    .disabled(vm.isLoading)
                 }
                 .padding(.horizontal, 22)
 
@@ -83,6 +117,34 @@ struct RegisterSheetView: View {
             }
         }
         .presentationBackground(.clear)
+        .alert("Error al crear cuenta", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(vm.errorMessage ?? "Ocurrió un error.")
+        }
+    }
+
+    // MARK: - Google sign up
+
+    @MainActor
+    private func signUpWithGoogle() async {
+        // Reutilizamos el loader/error del vm para UI consistente
+        vm.errorMessage = nil
+        vm.isLoading = true
+
+        do {
+            _ = try await AuthService.shared.signInWithGoogle()
+            vm.isLoading = false
+
+            dismiss()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                onCreated()
+            }
+        } catch {
+            vm.isLoading = false
+            vm.errorMessage = (error as NSError).localizedDescription
+            showErrorAlert = true
+        }
     }
 }
 

@@ -3,7 +3,6 @@ import SwiftUI
 struct RankingView: View {
 
     let bottomInset: CGFloat
-
     @State private var selected: Segment = .weekly
 
     enum Segment: String, CaseIterable, Identifiable {
@@ -32,44 +31,30 @@ struct RankingView: View {
                 Divider()
                     .overlay(Color.white.opacity(0.08))
 
-                // ⬇️ Podio fijo (no scrollea)
                 podium
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
-                // ⬇️ SOLO lista scrolleable
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 10) {
                         ForEach(model.rest) { row in
                             RankingRowView(row: row)
                         }
-
-                        // ✅ aire dinámico para que el último item no quede debajo del card + tab bar
-                        Spacer().frame(height: bottomInset + 90)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
+                    .padding(.bottom, 120)
                 }
             }
-
-            // ⬇️ Bloque opaco fijo (tapa la lista detrás)
-            VStack(spacing: 0) {
-                Spacer()
-
-                // esta placa opaca es la que "tapa" el ranking por debajo
-                Rectangle()
-                    .fill(Color.black)
-                    .frame(height: bottomInset + 120) // ajustá el 120 si querés más/menos alto
-                    .overlay(
-                        // arriba de la placa ponemos el card
-                        bottomPinnedCard
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, bottomInset - 12), // tu ajuste fino
-                        alignment: .top
-                    )
-            }
-            .ignoresSafeArea(edges: .bottom)
         }
+        .safeAreaInset(edge: .bottom) {
+            bottomPinnedCard
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, max(8, bottomInset - 8))
+                .background(Color.black.opacity(0.75))
+        }
+
         .navigationBarBackButtonHidden(true)
     }
 
@@ -218,9 +203,11 @@ struct RankingView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.black) // ✅ solo bloque negro, sin borde
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.75))
+        )
     }
-
 
     private func formatPoints(_ points: Int) -> String {
         let formatter = NumberFormatter()
@@ -231,7 +218,7 @@ struct RankingView: View {
     }
 }
 
-// MARK: - Podium Item (con medallas color)
+// MARK: - Podium Item
 
 private struct PodiumItemView: View {
     let rank: Int
@@ -242,15 +229,15 @@ private struct PodiumItemView: View {
 
     private var medalColor: Color {
         switch rank {
-        case 1: return Color.yellow.opacity(0.95)   // oro
-        case 2: return Color.white.opacity(0.85)    // plata
-        default: return Color.orange.opacity(0.85)  // bronce
+        case 1: return Color.yellow.opacity(0.95)
+        case 2: return Color.white.opacity(0.85)
+        default: return Color.orange.opacity(0.85)
         }
     }
 
     private var ringColor: Color {
         switch rank {
-        case 1: return Color.appGreen.opacity(0.90) // aro verde
+        case 1: return Color.appGreen.opacity(0.90)
         case 2: return Color.white.opacity(0.20)
         default: return Color.white.opacity(0.18)
         }

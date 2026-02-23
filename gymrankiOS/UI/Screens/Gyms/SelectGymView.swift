@@ -1,20 +1,17 @@
 import SwiftUI
+import FirebaseAuth
 
 struct SelectGymView: View {
 
     @Binding var path: NavigationPath
     @State private var query: String = ""
 
-    private let gyms: [GymCardModel] = [
-        .init(name: "Iron Temple", city: "Buenos Aires, Argentina", badge: "🔥 Alta competencia", assetName: "gym"),
-        .init(name: "Titan Gym", city: "Córdoba, Argentina", badge: "🔥 Alta competencia", assetName: "gym2"),
-        .init(name: "Beast Factory", city: "Rosario, Argentina", badge: "🔥 Alta competencia", assetName: "gym3"),
-        .init(name: "Fuerza Sur", city: "La Plata, Argentina", badge: nil, assetName: "gym4"),
-        .init(name: "Power House", city: "Mar del Plata, Argentina", badge: nil, assetName: "gym5"),
-        .init(name: "Strong Nation", city: "Mendoza, Argentina", badge: "🔥 Alta competencia", assetName: "gym6")
-    ]
+    @State private var gyms: [Gym] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var showErrorAlert = false
 
-    private var filteredGyms: [GymCardModel] {
+    private var filteredGyms: [Gym] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return gyms }
         return gyms.filter {
@@ -48,32 +45,74 @@ struct SelectGymView: View {
 
                 Spacer().frame(height: 16)
 
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(spacing: 16) {
-                        ForEach(filteredGyms) { gym in
-                            GymCard(gym: gym) {
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 16) {
+
+                            GymCardGeneric(
+                                title: "Mi gimnasio no esta",
+                                subtitle: "Continuá sin vincular",
+                                badge: "⭐ Opción manual",
+                                assetName: "gym"
+                            ) {
                                 path.append(AppRoute.dashboard)
                             }
+
+                            ForEach(filteredGyms) { gym in
+                                GymCardLive(gym: gym) {
+                                    Task { await joinGym(gym) }
+                                }
+                            }
                         }
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 32)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 32)
+                    .frame(maxHeight: .infinity)
                 }
-                .frame(maxHeight: .infinity)
             }
             .safeAreaPadding(.top, 8)
         }
+        .task { await loadGyms() }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage ?? "Ocurrió un error.")
+        }
     }
-}
 
-// MARK: - Model
+    // MARK: - Data
 
-struct GymCardModel: Identifiable, Hashable {
-    let id = UUID()
-    let name: String
-    let city: String
-    let badge: String?
-    let assetName: String
+    private func loadGyms() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            gyms = try await GymRepository.shared.fetchActiveGyms()
+        } catch {
+            errorMessage = (error as NSError).localizedDescription
+            showErrorAlert = true
+        }
+    }
+
+    private func joinGym(_ gym: Gym) async {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "No hay sesión activa. Volvé a iniciar sesión."
+            showErrorAlert = true
+            return
+        }
+
+        do {
+            try await UserRepository.shared.setGym(uid: uid, gymId: gym.id, gymNameCache: gym.name)
+            path.append(AppRoute.dashboard)
+        } catch {
+            errorMessage = (error as NSError).localizedDescription
+            showErrorAlert = true
+        }
+    }
 }
 
 // MARK: - Background
@@ -138,19 +177,17 @@ private struct SearchBar: View {
     }
 }
 
-// MARK: - Card
+// MARK: - Cards (Live from Firestore)
 
-private struct GymCard: View {
-    let gym: GymCardModel
+private struct GymCardLive: View {
+    let gym: Gym
     let onJoin: () -> Void
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-
             ZStack(alignment: .topLeading) {
-
-                // ✅ Imagen bien recortada
-                Image(gym.assetName)
+                // Usamos una imagen genérica (podés mapear por city o id después)
+                Image("gym")
                     .resizable()
                     .scaledToFill()
                     .frame(height: 150)
@@ -168,19 +205,16 @@ private struct GymCard: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 18))
 
-                // ✅ capa glass sutil
                 RoundedRectangle(cornerRadius: 18)
                     .fill(Color.white.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 18))
 
-                // ✅ borde
                 RoundedRectangle(cornerRadius: 18)
                     .stroke(Color.white.opacity(0.10), lineWidth: 1)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    if let badge = gym.badge {
-                        BadgePill(text: badge)
-                    }
+                    // badge opcional (si después lo querés en Firestore)
+                    BadgePill(text: "🔥 Alta competencia")
 
                     Spacer()
 
@@ -189,7 +223,7 @@ private struct GymCard: View {
                             .font(.system(size: 22, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
 
-                        Text(gym.city)
+                        Text("\(gym.city), Argentina")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.65))
                     }
@@ -199,6 +233,70 @@ private struct GymCard: View {
             .frame(height: 150)
 
             JoinButton(title: "Unirme", action: onJoin)
+                .padding(16)
+        }
+    }
+}
+
+// MARK: - Generic card (fallback first option)
+
+private struct GymCardGeneric: View {
+    let title: String
+    let subtitle: String
+    let badge: String?
+    let assetName: String
+    let onJoin: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .topLeading) {
+                Image(assetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: 150)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .overlay(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.black.opacity(0.10),
+                                Color.black.opacity(0.75)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    if let badge {
+                        BadgePill(text: badge)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(.system(size: 22, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text(subtitle)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.65))
+                    }
+                }
+                .padding(16)
+            }
+            .frame(height: 150)
+
+            JoinButton(title: "Continuar", action: onJoin)
                 .padding(16)
         }
     }

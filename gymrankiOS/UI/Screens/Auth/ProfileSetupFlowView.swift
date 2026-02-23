@@ -6,16 +6,18 @@
 //
 
 import SwiftUI
+import FirebaseAuth
 
-// MARK: - Profile Setup Flow (5 pasos)
+// MARK: - Profile Setup Flow (6 pasos)
 
 struct ProfileSetupFlowView: View {
 
     let onFinish: () -> Void
 
-    @State private var step: Step = .birthdate
+    @State private var step: Step = .fullName
 
     // Datos
+    @State private var fullName: String = ""
     @State private var birthdate: Date? = nil
     @State private var weightKg: String = ""
     @State private var heightCm: String = ""
@@ -25,15 +27,22 @@ struct ProfileSetupFlowView: View {
     // UI
     @State private var showDatePicker = false
 
+    // Guardado
+    @State private var isSaving = false
+    @State private var showSaveError = false
+    @State private var saveErrorMessage: String = "Ocurrió un error al guardar tu perfil."
+
     enum Step: Int, CaseIterable {
-        case birthdate = 1
-        case weight = 2
-        case height = 3
-        case gender = 4
-        case experience = 5
+        case fullName = 1
+        case birthdate = 2
+        case weight = 3
+        case height = 4
+        case gender = 5
+        case experience = 6
 
         var title: String {
             switch self {
+            case .fullName: return "Nombre y apellido"
             case .birthdate: return "Fecha de nacimiento"
             case .weight: return "Peso"
             case .height: return "Altura"
@@ -44,6 +53,7 @@ struct ProfileSetupFlowView: View {
 
         var subtitle: String {
             switch self {
+            case .fullName: return "¿Cómo te llamás?"
             case .birthdate: return "¿Cuándo naciste?"
             case .weight: return "Ingresá tu peso actual"
             case .height: return "Ingresá tu altura"
@@ -77,14 +87,12 @@ struct ProfileSetupFlowView: View {
 
             VStack(spacing: 0) {
 
-                // Top area
                 topHeader
                     .padding(.top, 10)
                     .padding(.horizontal, 18)
 
                 Spacer().frame(height: 18)
 
-                // Icon (dumbbell)
                 Image(systemName: "dumbbell.fill")
                     .font(.system(size: 42, weight: .bold))
                     .foregroundColor(Color.appGreen.opacity(0.28))
@@ -92,13 +100,11 @@ struct ProfileSetupFlowView: View {
 
                 Spacer()
 
-                // Center card
                 centerCard
                     .padding(.horizontal, 18)
 
                 Spacer()
 
-                // Bottom actions
                 bottomBar
                     .padding(.horizontal, 18)
                     .padding(.bottom, 12)
@@ -118,6 +124,11 @@ struct ProfileSetupFlowView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(22)
         }
+        .alert("No se pudo guardar", isPresented: $showSaveError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(saveErrorMessage)
+        }
     }
 
     // MARK: - Top Header
@@ -132,7 +143,7 @@ struct ProfileSetupFlowView: View {
 
                 Spacer()
 
-                Text("Paso \(step.rawValue) de 5")
+                Text("Paso \(step.rawValue) de 6")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.65))
             }
@@ -147,7 +158,6 @@ struct ProfileSetupFlowView: View {
                     .frame(width: progressWidth(totalWidth: UIScreen.main.bounds.width - 36), height: 6)
             }
 
-            // Pill “GYM RANK”
             Text("GYM RANK")
                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.80))
@@ -164,7 +174,7 @@ struct ProfileSetupFlowView: View {
     }
 
     private func progressWidth(totalWidth: CGFloat) -> CGFloat {
-        let t = CGFloat(step.rawValue) / 5.0
+        let t = CGFloat(step.rawValue) / 6.0
         return max(40, totalWidth * t)
     }
 
@@ -184,6 +194,14 @@ struct ProfileSetupFlowView: View {
             }
 
             switch step {
+            case .fullName:
+                inputField(
+                    icon: "person.fill",
+                    placeholder: "Nombre y apellido",
+                    text: $fullName,
+                    keyboard: .default
+                )
+
             case .birthdate:
                 dateField
 
@@ -211,7 +229,6 @@ struct ProfileSetupFlowView: View {
                         gender = Gender.allCases.first(where: { $0.rawValue == picked })
                     }
                 )
-
                 hintText("Tocá una opción para continuar")
 
             case .experience:
@@ -222,10 +239,8 @@ struct ProfileSetupFlowView: View {
                         experience = Experience.allCases.first(where: { $0.rawValue == picked })
                     }
                 )
-
                 hintText("Tocá una opción para continuar")
             }
-
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -248,7 +263,7 @@ struct ProfileSetupFlowView: View {
             showDatePicker = true
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "person")
+                Image(systemName: "calendar")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.white.opacity(0.45))
                     .frame(width: 18)
@@ -297,6 +312,7 @@ struct ProfileSetupFlowView: View {
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.88))
                 .tint(Color.appGreen.opacity(0.95))
+                .textInputAutocapitalization(.words)
 
             Spacer()
         }
@@ -361,29 +377,32 @@ struct ProfileSetupFlowView: View {
                     .frame(width: 56, alignment: .leading)
             }
             .buttonStyle(.plain)
-            .opacity(step == .birthdate ? 0.25 : 1.0)
-            .disabled(step == .birthdate)
+            .opacity(step == .fullName ? 0.25 : 1.0)
+            .disabled(step == .fullName || isSaving)
 
             Button {
                 goNext()
             } label: {
-                Text(step.buttonTitle)
+                Text(isSaving ? "Guardando..." : step.buttonTitle)
                     .font(.system(size: 15, weight: .heavy, design: .rounded))
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
                     .background(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(Color.appGreen.opacity(isNextEnabled ? 0.95 : 0.45))
+                            .fill(Color.appGreen.opacity(isNextEnabled && !isSaving ? 0.95 : 0.45))
                     )
             }
             .buttonStyle(.plain)
-            .disabled(!isNextEnabled)
+            .disabled(!isNextEnabled || isSaving)
         }
     }
 
     private var isNextEnabled: Bool {
         switch step {
+        case .fullName:
+            let n = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.count >= 3 && n.contains(" ")
         case .birthdate:
             return birthdate != nil
         case .weight:
@@ -414,12 +433,65 @@ struct ProfileSetupFlowView: View {
 
     private func goNext() {
         if step == .experience {
-            onFinish()
+            saveProfileAndFinish()
             return
         }
         guard let next = Step(rawValue: step.rawValue + 1) else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
             step = next
+        }
+    }
+
+    // MARK: - Save Profile
+
+    private func saveProfileAndFinish() {
+        guard !isSaving else { return }
+        guard let uid = Auth.auth().currentUser?.uid else {
+            saveErrorMessage = "No se encontró una sesión activa. Volvé a iniciar sesión."
+            showSaveError = true
+            return
+        }
+        let name = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name.count >= 3 else {
+            saveErrorMessage = "Ingresá tu nombre y apellido."
+            showSaveError = true
+            return
+        }
+        guard let birthdate else {
+            saveErrorMessage = "Seleccioná tu fecha de nacimiento."
+            showSaveError = true
+            return
+        }
+
+        let weight = Double(weightKg.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")) ?? 0
+
+        let height = Double(heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")) ?? 0
+
+        let g = gender?.rawValue ?? "Otro"
+        let exp = experience?.rawValue ?? "Principiante"
+
+        isSaving = true
+
+        Task {
+            do {
+                try await UserRepository.shared.updateProfile(
+                    uid: uid,
+                    fullName: name,
+                    birthdate: birthdate,
+                    weightKg: weight,
+                    heightCm: height,
+                    gender: g,
+                    experience: exp
+                )
+                isSaving = false
+                onFinish()
+            } catch {
+                isSaving = false
+                saveErrorMessage = (error as NSError).localizedDescription
+                showSaveError = true
+            }
         }
     }
 }
@@ -447,7 +519,6 @@ private struct DatePickerSheet: View {
             VStack(spacing: 14) {
                 Spacer().frame(height: 6)
 
-                // Header
                 HStack {
                     Text("Elegí tu fecha")
                         .font(.system(size: 16, weight: .heavy, design: .rounded))
@@ -466,7 +537,6 @@ private struct DatePickerSheet: View {
                     .buttonStyle(.plain)
                 }
 
-                // Calendar card
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color.black.opacity(0.55))
                     .overlay(
@@ -486,7 +556,6 @@ private struct DatePickerSheet: View {
                     )
                     .frame(height: 300)
 
-                // Button
                 Button {
                     onSave(selectedDate)
                 } label: {

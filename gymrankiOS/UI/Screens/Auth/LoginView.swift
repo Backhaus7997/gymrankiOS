@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct LoginView: View {
     @Binding var path: NavigationPath
@@ -7,6 +8,9 @@ struct LoginView: View {
     @State private var password = ""
 
     @State private var showRegisterSheet = false
+
+    @StateObject private var vm = AuthViewModel()
+    @State private var showErrorAlert = false
 
     var body: some View {
         ZStack {
@@ -34,7 +38,7 @@ struct LoginView: View {
 
                     VStack(spacing: 14) {
                         AppTextField(
-                            placeholder: "Correo o usuario",
+                            placeholder: "Correo",
                             text: $emailOrUser,
                             leftIconSystemName: "envelope"
                         )
@@ -49,10 +53,20 @@ struct LoginView: View {
 
                     Spacer().frame(height: 18)
 
-                    PrimaryButton(title: "ENTRAR  →") {
-                        path.append(AppRoute.selectGym)
+                    PrimaryButton(title: vm.isLoading ? "ENTRANDO..." : "ENTRAR  →") {
+                        Task {
+                            let email = emailOrUser.trimmingCharacters(in: .whitespacesAndNewlines)
+                            await vm.login(email: email, password: password)
+
+                            if vm.errorMessage != nil {
+                                showErrorAlert = true
+                            } else {
+                                path.append(AppRoute.dashboard)
+                            }
+                        }
                     }
                     .padding(.horizontal, 24)
+                    .disabled(vm.isLoading)
 
                     Spacer().frame(height: 18)
 
@@ -62,8 +76,13 @@ struct LoginView: View {
                     Spacer().frame(height: 14)
 
                     HStack(spacing: 14) {
-                        SocialButton(title: "Google") { }
-                        SocialButton(title: "Apple") { }
+                        SocialButton(title: "Google") {
+                            Task {
+                                await vm.loginWithGoogle()
+                                if vm.errorMessage != nil { showErrorAlert = true }
+                                else { path.append(AppRoute.dashboard) }
+                            }
+                        }
                     }
                     .padding(.horizontal, 24)
 
@@ -82,6 +101,11 @@ struct LoginView: View {
             RegisterSheetView(onCreated: {
                 path.append(AppRoute.profileSetup)
             })
+        }
+        .alert("Error de login", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(vm.errorMessage ?? "Ocurrió un error.")
         }
     }
 }
