@@ -29,6 +29,7 @@ struct WorkoutRoutine: Identifiable, Codable {
 }
 
 struct RoutineExercise: Identifiable, Codable, Equatable {
+
     var id: String
     var exerciseId: String?
     var name: String

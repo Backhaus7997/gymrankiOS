@@ -200,9 +200,9 @@ struct CreateRoutineView: View {
 
     private var exercisesList: some View {
         VStack(spacing: 14) {
-            ForEach($vm.exercises) { $exercise in
+            ForEach(vm.exercises) { ex in
                 ExerciseCardView(
-                    exercise: $exercise,
+                    exercise: binding(for: ex.id),
                     selectedMusclesEmpty: selectedMuscles.isEmpty,
                     filteredNames: filteredExerciseNames,
                     allNames: allExerciseNames,
@@ -213,7 +213,10 @@ struct CreateRoutineView: View {
                             expandedExerciseId = nil
                             exerciseSearch = ""
                         }
-                        vm.removeExercise(id: id)
+
+                        DispatchQueue.main.async {
+                            vm.removeExercise(id: id)
+                        }
                     }
                 )
             }
@@ -245,6 +248,19 @@ struct CreateRoutineView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color.white.opacity(0.10), lineWidth: 1)
             )
+    }
+    
+    private func binding(for id: String) -> Binding<RoutineExercise> {
+        Binding<RoutineExercise>(
+            get: {
+                vm.exercises.first(where: { $0.id == id }) ?? RoutineExercise(id: id)
+            },
+            set: { newValue in
+                if let idx = vm.exercises.firstIndex(where: { $0.id == id }) {
+                    vm.exercises[idx] = newValue
+                }
+            }
+        )
     }
 }
 

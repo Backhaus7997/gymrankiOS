@@ -11,8 +11,10 @@ final class CreateRoutineViewModel: ObservableObject {
     @Published var title: String = ""
     @Published var description: String = ""
 
+    /// IMPORTANTE: cada RoutineExercise debe tener id único.
+    /// Si tu RoutineExercise() no genera UUID, esto igual te protege porque acá lo regeneramos al crear.
     @Published var exercises: [RoutineExercise] = [
-        RoutineExercise()
+        RoutineExercise(id: UUID().uuidString)
     ]
 
     @Published var isLoading: Bool = false
@@ -22,13 +24,16 @@ final class CreateRoutineViewModel: ObservableObject {
     private let repo = RoutineRepository()
 
     func addExercise() {
-        exercises.append(RoutineExercise())
+        exercises.append(RoutineExercise(id: UUID().uuidString))
     }
 
     func removeExercise(id: String) {
+        // Si hay ids duplicados, removeAll elimina todos los duplicados y evita inconsistencias
         exercises.removeAll { $0.id == id }
+
+        // opcional: mantener siempre 1 card visible
         if exercises.isEmpty {
-            exercises.append(RoutineExercise())
+            exercises = [RoutineExercise(id: UUID().uuidString)]
         }
     }
 
@@ -80,12 +85,19 @@ final class CreateRoutineViewModel: ObservableObject {
                     return
                 }
             }
+
+            // Por las dudas: si algún ejercicio quedó con id vacío/duplicado, lo regeneramos
+            if cleanedExercises[i].id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cleanedExercises[i].id = UUID().uuidString
+            }
         }
 
         isLoading = true
         defer { isLoading = false }
 
         do {
+            let now = Date()
+
             let routine = WorkoutRoutine(
                 id: UUID().uuidString,
                 userId: uid,
@@ -93,13 +105,19 @@ final class CreateRoutineViewModel: ObservableObject {
                 description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? nil
                     : description.trimmingCharacters(in: .whitespacesAndNewlines),
-                createdAt: nil,
-                updatedAt: nil,
+                createdAt: now,
+                updatedAt: now,
                 exercises: cleanedExercises
             )
 
             try await repo.createRoutine(routine)
             didSave = true
+
+            // opcional: reset form
+            title = ""
+            description = ""
+            exercises = [RoutineExercise(id: UUID().uuidString)]
+
         } catch {
             errorMessage = error.localizedDescription
         }
