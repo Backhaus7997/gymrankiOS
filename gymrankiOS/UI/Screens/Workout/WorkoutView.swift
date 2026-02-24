@@ -3,7 +3,17 @@ import SwiftUI
 struct WorkoutView: View {
 
     @EnvironmentObject private var session: SessionManager
+
+    // ✅ Rutinas (plantillas) para "Mis entrenamientos"
+    @StateObject private var routinesVM = MyRoutinesViewModel()
+
+    // ✅ Plan semanal (MainView / UserDefaults) para RECUPERACIÓN
+    @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
+
+    // Modal de detalles de rutina (el que ya tenías)
     @State private var selectedRoutine: WorkoutRoutine? = nil
+
+    private var uid: String { session.userId ?? "" }
 
     var body: some View {
         NavigationStack {
@@ -16,11 +26,18 @@ struct WorkoutView: View {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 14) {
                             QuickActionsGrid()
-                            RecoveryCard()
 
-                            MyRoutinesCard(onDetails: { routine in
-                                selectedRoutine = routine
-                            })
+                            // ✅ Recuperación basada en el PLAN semanal (Mi rutina)
+                            RecoveryCard(plan: routinePlan)
+
+                            // ✅ Mis entrenamientos (routines de Firebase)
+                            MyRoutinesCard(
+                                vm: routinesVM,
+                                uid: uid,
+                                onDetails: { routine in
+                                    selectedRoutine = routine
+                                }
+                            )
                         }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
@@ -52,6 +69,14 @@ struct WorkoutView: View {
                     }
                     .animation(.spring(response: 0.25, dampingFraction: 0.9), value: routine.id)
                 }
+            }
+            .task(id: uid) {
+                guard !uid.isEmpty else { return }
+                await routinesVM.load(userId: uid)
+            }
+            // ✅ Cada vez que entrás a Workout, refresca el plan desde UserDefaults
+            .onAppear {
+                routinePlan = RoutineStorage.load() ?? RoutinePlan()
             }
         }
     }
@@ -173,9 +198,13 @@ private struct QuickActionCard: View {
     }
 }
 
-// MARK: - Recovery
+// MARK: - Recovery (basado en el plan semanal - Mi rutina)
 
 private struct RecoveryCard: View {
+
+    let plan: RoutinePlan
+    @State private var showDetails = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
 
@@ -186,15 +215,40 @@ private struct RecoveryCard: View {
 
                 Spacer()
 
-                Button("Detalles") { print("detalles") }
+                Button("Detalles") { showDetails = true }
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(Color.appGreen)
                     .buttonStyle(.plain)
+                    .disabled(plan.isEmpty)
+                    .opacity(plan.isEmpty ? 0.5 : 1)
             }
 
-            HStack(spacing: 14) {
-                RecoverySmallCard(title: "Abductores", percent: "100%")
-                RecoverySmallCard(title: "Abdominales", percent: "100%")
+            if plan.isEmpty {
+                Text("Cargá tu plan en “Mi rutina” para ver la recuperación.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.60))
+                    .padding(.top, 2)
+
+            } else {
+                let schedule = plan.recoverySchedule()
+                let top = MuscleRecoveryEngine.top(schedule: schedule, limit: 2)
+
+                if top.isEmpty {
+                    Text("Asigná músculos por día en tu plan para ver la recuperación.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.60))
+                        .padding(.top, 2)
+                } else {
+                    HStack(spacing: 14) {
+                        ForEach(top) { item in
+                            RecoverySmallCard(title: item.muscle, percent: item.percent)
+                        }
+
+                        if top.count == 1 {
+                            Spacer().frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
         }
         .padding(14)
@@ -206,35 +260,63 @@ private struct RecoveryCard: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
         )
+        .sheet(isPresented: $showDetails) {
+            MuscleRecoveryDetailsView(schedule: plan.recoverySchedule())
+                .presentationDetents([.large])
+        }
     }
 }
 
 private struct RecoverySmallCard: View {
     let title: String
-    let percent: String
+    let percent: Double // 0...1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("💪")
-                .font(.system(size: 28))
 
-            Spacer()
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.appGreen.opacity(0.16))
+                    .frame(width: 44, height: 44)
+
+                Image(systemName: iconName(for: title))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(Color.appGreen.opacity(0.95))
+            }
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .center) // controla layout
+            .padding(.top, 2)
 
             Text(title)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.80)
 
-            Text(percent)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.black.opacity(0.25))
+                        .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+
+                    Capsule()
+                        .fill(Color.appGreen.opacity(0.90))
+                        .frame(width: max(8, w * CGFloat(min(max(percent, 0), 1))))
+                }
+            }
+            .frame(height: 10)
+
+            Text("\(Int(round(percent * 100)))%")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
                 .foregroundColor(Color.appGreen.opacity(0.95))
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .frame(height: 30)
                 .background(Capsule().fill(Color.black.opacity(0.35)))
                 .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .frame(height: 150)
+        .frame(height: 150) // mantenemos tu altura
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(Color.white.opacity(0.06))
@@ -244,17 +326,34 @@ private struct RecoverySmallCard: View {
                 )
         )
     }
+
+    private func iconName(for muscle: String) -> String {
+        switch muscle.lowercased() {
+        case "pecho": return "heart.fill"
+        case "espalda": return "figure.strengthtraining.traditional"
+        case "hombros": return "figure.arms.open"
+        case "bíceps", "biceps": return "bolt.fill"
+        case "tríceps", "triceps": return "bolt.circle.fill"
+        case "abdomen", "abdominales": return "circle.grid.cross.fill"
+        case "glúteos", "gluteos": return "figure.walk"
+        case "cuadriceps": return "figure.run"
+        case "femorales": return "figure.run.circle.fill"
+        case "pantorrillas": return "figure.hiking"
+        case "trapecios": return "shield.lefthalf.filled"
+        case "antebrazos": return "hand.raised.fill"
+        default: return "dumbbell.fill"
+        }
+    }
 }
 
 // MARK: - My routines
 
 private struct MyRoutinesCard: View {
-    @EnvironmentObject private var session: SessionManager
-    @StateObject private var vm = MyRoutinesViewModel()
+
+    @ObservedObject var vm: MyRoutinesViewModel
+    let uid: String
 
     let onDetails: (WorkoutRoutine) -> Void
-
-    private var uid: String { session.userId ?? "" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -349,10 +448,6 @@ private struct MyRoutinesCard: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
         )
-        .task(id: uid) {
-            guard !uid.isEmpty else { return }
-            await vm.load(userId: uid)
-        }
     }
 }
 

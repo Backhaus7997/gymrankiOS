@@ -19,7 +19,6 @@ struct MainView: View {
     @State private var logoutErrorMessage: String?
     @State private var showLogoutError = false
 
-    // ✅ Plan de rutina persistido
     @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
 
     var body: some View {
@@ -31,14 +30,13 @@ struct MainView: View {
 
                 VStack(spacing: 14) {
 
-                    TopBar(
-                        onTapProfile: { showLogoutPopup = true }
-                    )
-                    .frame(width: contentWidth, alignment: .center)
-                    .padding(.top, 10)
+                    TopBar(onTapProfile: { showLogoutPopup = true })
+                        .frame(width: contentWidth, alignment: .center)
+                        .padding(.top, 10)
 
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 14) {
+
                             HomeQuickActionsRow(
                                 onLoadWorkout: onGoToWorkout,
                                 onViewRanking: onGoToRanking
@@ -49,7 +47,7 @@ struct MainView: View {
 
                             TrainingCalendarCard(maxWidth: contentWidth)
 
-                            // ✅ Nueva card: Mi rutina
+                            // ✅ Mi rutina
                             MiRutinaCard(routinePlan: $routinePlan)
 
                             // ✅ Sets por músculo
@@ -63,7 +61,6 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        // Popup para cerrar sesión
         .confirmationDialog(
             "Cuenta",
             isPresented: $showLogoutPopup,
@@ -72,6 +69,7 @@ struct MainView: View {
             Button("Cerrar sesión", role: .destructive) {
                 do {
                     try AuthService.shared.logout()
+                    RoutineStorage.clear()
                 } catch {
                     logoutErrorMessage = (error as NSError).localizedDescription
                     showLogoutError = true
@@ -114,7 +112,6 @@ private struct TopBar: View {
                 }
                 .buttonStyle(.plain)
 
-                // PERFIL: ahora es el ícono de persona (no letra)
                 Button(action: onTapProfile) {
                     Image(systemName: "person.fill")
                         .font(.system(size: 16, weight: .bold))
@@ -213,13 +210,12 @@ private struct HomeQuickCard: View {
 
 private enum BodySide { case front, back }
 
-private enum MuscleGroup: String, CaseIterable, Identifiable {
+fileprivate enum MuscleGroup: String, CaseIterable, Identifiable {
     case chest, abs, obliques, shoulders, traps, biceps, quads, calves
     case lats, back, lowerback, glutes, forearms, hamstrings
 
     var id: String { rawValue }
 
-    /// asset names based on your file list
     func maskName(for side: BodySide) -> String? {
         switch (self, side) {
         case (.chest, .front): return "mask_front_chest"
@@ -243,6 +239,26 @@ private enum MuscleGroup: String, CaseIterable, Identifiable {
 
         default:
             return nil
+        }
+    }
+}
+
+// ✅ esto reemplaza el método que antes estaba dentro de RoutineMuscle (cuando era private en este file)
+fileprivate extension RoutineMuscle {
+    func toMuscleGroups() -> [MuscleGroup] {
+        switch self {
+        case .pecho: return [.chest]
+        case .espalda: return [.back, .lats]
+        case .femorales: return [.hamstrings]
+        case .hombros: return [.shoulders]
+        case .biceps: return [.biceps]
+        case .triceps: return [] // no mask en tu enum actual
+        case .abdomen: return [.abs]
+        case .gluteos: return [.glutes]
+        case .cuadriceps: return [.quads]
+        case .pantorrillas: return [.calves]
+        case .trapecios: return [.traps]
+        case .antebrazos: return [.forearms]
         }
     }
 }
@@ -305,120 +321,7 @@ private struct BodyWithHighlights: View {
     }
 }
 
-// MARK: - Routine (Mi rutina) - Model + Storage
-
-private enum Weekday: Int, CaseIterable, Identifiable, Codable {
-    case monday = 1, tuesday, wednesday, thursday, friday, saturday, sunday
-    var id: Int { rawValue }
-
-    var shortLabel: String {
-        switch self {
-        case .monday: return "L"
-        case .tuesday: return "M"
-        case .wednesday: return "M"
-        case .thursday: return "J"
-        case .friday: return "V"
-        case .saturday: return "S"
-        case .sunday: return "D"
-        }
-    }
-
-    var fullLabel: String {
-        switch self {
-        case .monday: return "Lunes"
-        case .tuesday: return "Martes"
-        case .wednesday: return "Miércoles"
-        case .thursday: return "Jueves"
-        case .friday: return "Viernes"
-        case .saturday: return "Sábado"
-        case .sunday: return "Domingo"
-        }
-    }
-
-    static var today: Weekday {
-        let weekday = Calendar.current.component(.weekday, from: Date()) // 1=Dom ... 7=Sáb
-        let mondayBased = ((weekday + 5) % 7) + 1 // 1=Lun ... 7=Dom
-        return Weekday(rawValue: mondayBased) ?? .monday
-    }
-}
-
-private enum RoutineMuscle: String, CaseIterable, Identifiable, Codable {
-    case pecho = "Pecho"
-    case espalda = "Espalda"
-    case femorales = "Femorales"
-    case hombros = "Hombros"
-    case biceps = "Bíceps"
-    case triceps = "Tríceps"
-    case abdomen = "Abdomen"
-    case gluteos = "Glúteos"
-    case cuadriceps = "Cuadriceps"
-    case pantorrillas = "Pantorrillas"
-    case trapecios = "Trapecios"
-    case antebrazos = "Antebrazos"
-
-    var id: String { rawValue }
-
-    func toMuscleGroups() -> [MuscleGroup] {
-        switch self {
-        case .pecho: return [.chest]
-        case .espalda: return [.back, .lats]
-        case .femorales: return [.hamstrings]
-        case .hombros: return [.shoulders]
-        case .biceps: return [.biceps]
-        case .triceps: return [] // no mask en tu enum actual
-        case .abdomen: return [.abs]
-        case .gluteos: return [.glutes]
-        case .cuadriceps: return [.quads]
-        case .pantorrillas: return [.calves]
-        case .trapecios: return [.traps]
-        case .antebrazos: return [.forearms]
-        }
-    }
-}
-
-private struct RoutinePlan: Codable, Equatable {
-    var byDay: [Weekday: [RoutineMuscle]] = [:]
-
-    func muscles(for day: Weekday) -> [RoutineMuscle] {
-        byDay[day] ?? []
-    }
-
-    var isEmpty: Bool {
-        byDay.values.allSatisfy { $0.isEmpty }
-    }
-}
-
-private enum RoutineStorage {
-
-    private static func keyForCurrentUser() -> String? {
-        guard let uid = Auth.auth().currentUser?.uid, !uid.isEmpty else { return nil }
-        return "routine_plan_v1_\(uid)"
-    }
-
-    static func load() -> RoutinePlan? {
-        guard let key = keyForCurrentUser() else { return nil }
-
-        guard
-            let data = UserDefaults.standard.data(forKey: key),
-            let plan = try? JSONDecoder().decode(RoutinePlan.self, from: data)
-        else { return nil }
-
-        return plan
-    }
-
-    static func save(_ plan: RoutinePlan) {
-        guard let key = keyForCurrentUser() else { return }
-        guard let data = try? JSONEncoder().encode(plan) else { return }
-        UserDefaults.standard.set(data, forKey: key)
-    }
-
-    static func clear() {
-        guard let key = keyForCurrentUser() else { return }
-        UserDefaults.standard.removeObject(forKey: key)
-    }
-}
-
-// MARK: - Weekly muscles (ahora pinta lo de HOY según Mi rutina)
+// MARK: - Weekly muscles (pinta lo de HOY según Mi rutina)
 
 private struct MuscleBodyCard: View {
     let title: String
@@ -1012,8 +915,6 @@ private struct MuscleSetPill: View {
         )
     }
 }
-
-// MARK: - Preview
 
 #Preview {
     MainView(

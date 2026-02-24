@@ -13,14 +13,21 @@ final class RoutineRepository {
             .collection("routines")
             .document(routineId)
 
+        // ✅ Guardar TODOS los campos que necesitamos (incluye weekday + muscles + exerciseId)
         let exercisesArray: [[String: Any]] = routine.exercises.map { ex in
             var dict: [String: Any] = [
                 "id": ex.id,
+                "exerciseId": ex.exerciseId as Any,
                 "name": ex.name,
                 "sets": ex.sets,
                 "reps": ex.reps,
-                "usesBodyweight": ex.usesBodyweight
+                "usesBodyweight": ex.usesBodyweight,
+
+                // ✅ NUEVOS
+                "weekday": ex.weekday,          // Int 1...7
+                "muscles": ex.muscles           // [String]
             ]
+
             dict["weightKg"] = ex.usesBodyweight ? NSNull() : (ex.weightKg as Any)
             return dict
         }
@@ -34,7 +41,6 @@ final class RoutineRepository {
             "exercises": exercisesArray
         ]
 
-        // merge true evita pisar campos si algún día agregás más.
         try await ref.setData(data, merge: true)
     }
 
@@ -62,13 +68,38 @@ final class RoutineRepository {
 
             let exercisesRaw = data["exercises"] as? [[String: Any]] ?? []
             let exercises: [RoutineExercise] = exercisesRaw.map { ex in
-                RoutineExercise(
+
+                let usesBodyweight = ex["usesBodyweight"] as? Bool ?? false
+
+                // ✅ weightKg puede venir como Int o como Double según Firestore
+                let weightKg: Int? = {
+                    if usesBodyweight { return nil }
+                    if let i = ex["weightKg"] as? Int { return i }
+                    if let d = ex["weightKg"] as? Double { return Int(d) }
+                    return nil
+                }()
+
+                // ✅ NUEVOS (con defaults seguros)
+                let weekday: Int = ex["weekday"] as? Int ?? 0
+                let muscles: [String] = ex["muscles"] as? [String] ?? []
+                let exerciseId: String? = {
+                    let raw = ex["exerciseId"]
+                    if raw is NSNull { return nil }
+                    return raw as? String
+                }()
+
+                return RoutineExercise(
                     id: ex["id"] as? String ?? UUID().uuidString,
+                    exerciseId: exerciseId,
                     name: ex["name"] as? String ?? "",
                     sets: ex["sets"] as? Int ?? 3,
                     reps: ex["reps"] as? Int ?? 10,
-                    usesBodyweight: ex["usesBodyweight"] as? Bool ?? false,
-                    weightKg: ex["weightKg"] as? Int
+                    usesBodyweight: usesBodyweight,
+                    weightKg: weightKg,
+
+                    // ✅ NUEVOS
+                    weekday: weekday,
+                    muscles: muscles
                 )
             }
 

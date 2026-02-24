@@ -37,6 +37,8 @@ struct RoutineExercise: Identifiable, Codable, Equatable {
     var reps: Int
     var usesBodyweight: Bool
     var weightKg: Int?
+    var weekday: Int
+    var muscles: [String]
 
     init(
         id: String = UUID().uuidString,
@@ -45,7 +47,9 @@ struct RoutineExercise: Identifiable, Codable, Equatable {
         sets: Int = 3,
         reps: Int = 10,
         usesBodyweight: Bool = false,
-        weightKg: Int? = 60
+        weightKg: Int? = 60,
+        weekday: Int = 2,
+        muscles: [String] = []
     ) {
         self.id = id
         self.exerciseId = exerciseId
@@ -54,5 +58,8 @@ struct RoutineExercise: Identifiable, Codable, Equatable {
         self.reps = reps
         self.usesBodyweight = usesBodyweight
         self.weightKg = weightKg
+
+        self.weekday = weekday
+        self.muscles = muscles
     }
 }

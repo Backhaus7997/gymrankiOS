@@ -12,9 +12,10 @@ struct CreateRoutineView: View {
     @StateObject private var vm = CreateRoutineViewModel()
     @State private var showError = false
 
-    // ✅ Embedded catalog (NO JSON file)
     @State private var catalog: [ExercisesCatalogEntry] = ExercisesCatalogData.catalog
     @State private var selectedMuscles: Set<WorkoutMuscle> = []
+
+    @State private var selectedWeekday: RoutineWeekday = .monday
 
     // Dropdown inline
     @State private var expandedExerciseId: String? = nil
@@ -48,16 +49,26 @@ struct CreateRoutineView: View {
                     VStack(spacing: 14) {
 
                         detailsCard
+                        weekdayCard
                         musclesFilterCard
-                        exercisesHeader
-                        exercisesList
-                        saveButton
 
-                        Spacer().frame(height: 28)
+                        // ✅ Header sin botón (el botón va fijo abajo)
+                        exercisesHeaderNoButton
+
+                        exercisesList
+
+                        // espacio para la bottom bar
+                        Spacer().frame(height: 120)
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 18)
                 }
+            }
+
+            // ✅ Barra fija abajo (Agregar + Guardar)
+            VStack {
+                Spacer()
+                bottomBar
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -117,6 +128,41 @@ struct CreateRoutineView: View {
         .background(cardBackground)
     }
 
+    // MARK: - Weekday selector
+
+    private var weekdayCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Día de entrenamiento")
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+
+            HStack(spacing: 12) {
+                ForEach(RoutineWeekday.ordered) { d in
+                    Button {
+                        selectedWeekday = d
+                    } label: {
+                        Text(d.short)
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white.opacity(selectedWeekday == d ? 0.95 : 0.70))
+                            .frame(width: 38, height: 38)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(selectedWeekday == d ? Color.appGreen.opacity(0.18) : Color.white.opacity(0.06))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(selectedWeekday == d ? Color.appGreen.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(14)
+        .background(cardBackground)
+    }
+
     // MARK: - Muscles filter
 
     private var musclesFilterCard: some View {
@@ -160,9 +206,9 @@ struct CreateRoutineView: View {
         .background(cardBackground)
     }
 
-    // MARK: - Exercises header
+    // MARK: - Exercises header (sin botón)
 
-    private var exercisesHeader: some View {
+    private var exercisesHeaderNoButton: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Ejercicios")
@@ -175,23 +221,6 @@ struct CreateRoutineView: View {
             }
 
             Spacer()
-
-            Button { vm.addExercise() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("Agregar")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                }
-                .foregroundColor(Color.appGreen.opacity(0.95))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule().fill(Color.white.opacity(0.06))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
-                )
-            }
-            .buttonStyle(.plain)
         }
         .padding(.top, 2)
     }
@@ -223,6 +252,43 @@ struct CreateRoutineView: View {
         }
     }
 
+    // MARK: - Bottom bar (sticky)
+
+    private var bottomBar: some View {
+        VStack(spacing: 10) {
+
+            Button { vm.addExercise() } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Agregar ejercicio")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(Color.appGreen.opacity(0.95))
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+            saveButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 18)
+        .background(
+            Rectangle()
+                .fill(Color.black.opacity(0.30))
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
     // MARK: - Save button
 
     private var saveButton: some View {
@@ -231,12 +297,31 @@ struct CreateRoutineView: View {
             systemImage: "figure.strengthtraining.traditional"
         ) {
             Task {
+                let musclesToStore: [String] =
+                selectedMuscles.isEmpty
+                ? []
+                : selectedMuscles.map { $0.rawValue }
+
+                vm.exercises = vm.exercises.map { ex in
+                    var copy = ex
+                    copy.weekday = selectedWeekday.rawValue
+
+                    if !musclesToStore.isEmpty {
+                        copy.muscles = musclesToStore
+                    } else {
+                        if let catMuscle = catalog.first(where: { $0.exercises.contains(copy.name) })?.muscle {
+                            copy.muscles = [catMuscle]
+                        }
+                    }
+                    return copy
+                }
+
                 await vm.save(userId: uid)
                 if vm.errorMessage != nil { showError = true }
                 if vm.didSave { dismiss() }
             }
         }
-        .padding(.top, 8)
+        .padding(.top, 2)
         .disabled(!canSave || vm.isLoading)
         .opacity((!canSave || vm.isLoading) ? 0.6 : 1.0)
     }
@@ -249,7 +334,7 @@ struct CreateRoutineView: View {
                     .stroke(Color.white.opacity(0.10), lineWidth: 1)
             )
     }
-    
+
     private func binding(for id: String) -> Binding<RoutineExercise> {
         Binding<RoutineExercise>(
             get: {
@@ -404,7 +489,6 @@ private struct ExerciseCardView: View {
         VStack(alignment: .leading, spacing: 12) {
 
             headerRow
-
             dropdownHeaderButton
 
             if isExpanded {
@@ -846,6 +930,27 @@ enum WorkoutMuscle: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - NEW: Weekday enum
+
+enum RoutineWeekday: Int, CaseIterable, Identifiable {
+    case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
+    var id: Int { rawValue }
+
+    var short: String {
+        switch self {
+        case .monday: return "L"
+        case .tuesday: return "M"
+        case .wednesday: return "M"
+        case .thursday: return "J"
+        case .friday: return "V"
+        case .saturday: return "S"
+        case .sunday: return "D"
+        }
+    }
+
+    static let ordered: [RoutineWeekday] = [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]
+}
+
 // MARK: - UI components
 
 private struct GlassTextField: View {
@@ -986,11 +1091,11 @@ private struct WeightField: View {
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
         .opacity(isDisabled ? 0.55 : 1.0)
         .onAppear {
             if let v = value { text = "\(v)" }
@@ -1081,5 +1186,12 @@ private extension String {
         let raw = String(mapped)
         let collapsed = raw.replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
         return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+}
+
+#Preview {
+    NavigationStack {
+        CreateRoutineView()
+            .environmentObject(SessionManager())
     }
 }
