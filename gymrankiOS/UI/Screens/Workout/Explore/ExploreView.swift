@@ -2,10 +2,69 @@
 //  ExploreView.swift
 //  gymrankiOS
 //
-//  Created by Martin Backhaus on 10/02/2026.
-//
 
 import SwiftUI
+import FirebaseFirestore
+
+// MARK: - ViewModel
+
+@MainActor
+final class ExploreVM: ObservableObject {
+    @Published var isLoading = false
+    @Published var templates: [WorkoutTemplate] = []
+    @Published var errorMessage: String?
+
+    private let db = Firestore.firestore()
+
+    func loadAll() async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let snap = try await db
+                .collection("workoutTemplates")
+                .order(by: "updatedAt", descending: true)
+                .getDocuments()
+
+            templates = snap.documents.compactMap { Self.parseTemplate($0) }
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private static func parseTemplate(_ doc: QueryDocumentSnapshot) -> WorkoutTemplate? {
+        let data = doc.data()
+
+        guard
+            let title = data["title"] as? String,
+            let description = data["description"] as? String,
+            let frequencyPerWeek = data["frequencyPerWeek"] as? Int,
+            let goalTags = data["goalTags"] as? [String],
+            let isPro = data["isPro"] as? Bool,
+            let level = data["level"] as? String,
+            let visibility = data["visibility"] as? String,
+            let weeks = data["weeks"] as? Int
+        else { return nil }
+
+        return WorkoutTemplate(
+            id: doc.documentID,
+            title: title,
+            description: description,
+            frequencyPerWeek: frequencyPerWeek,
+            goalTags: goalTags,
+            isPro: isPro,
+            level: level,
+            visibility: visibility,
+            weeks: weeks,
+            createdAt: data["createdAt"] as? Timestamp,
+            updatedAt: data["updatedAt"] as? Timestamp
+        )
+    }
+}
+
+// MARK: - ExploreView
 
 struct ExploreView: View {
 
@@ -13,10 +72,19 @@ struct ExploreView: View {
     @State private var selectedTab: ExploreTab = .official
     @State private var query: String = ""
 
+    @StateObject private var vm = ExploreVM()
+
     enum ExploreTab: String, CaseIterable, Identifiable {
         case official = "Oficial"
         case community = "Comunidad"
         var id: String { rawValue }
+
+        var visibilityValue: String {
+            switch self {
+            case .official: return "official"
+            case .community: return "community"
+            }
+        }
     }
 
     var body: some View {
@@ -27,33 +95,16 @@ struct ExploreView: View {
                 VStack(spacing: 14) {
 
                     topBar
-
                     headerCard
-
                     segmentedTabs
-
                     searchBar
 
-                    VStack(spacing: 14) {
-                        ProgramCard(
-                            title: "Candito - Fuerza 6 Semanas",
-                            subtitle: "Ideal para testear 1RM y competir",
-                            tags: ["PRO", "6 Semanas", "Intermedio", "Fuerza"],
-                            frequency: "4x/sem",
-                            level: "Intermedio",
-                            isPro: true,
-                            imageName: "program1"
-                        )
-
-                        ProgramCard(
-                            title: "Juggernaut - Deadlift",
-                            subtitle: "Enfocado a levantar más en 16 semanas",
-                            tags: ["PRO", "16 Semanas", "Fuerza"],
-                            frequency: "4x/sem",
-                            level: "Intermedio",
-                            isPro: true,
-                            imageName: "program2"
-                        )
+                    if vm.isLoading {
+                        loadingState
+                    } else if let err = vm.errorMessage {
+                        errorState(err)
+                    } else {
+                        programsList
                     }
                 }
                 .padding(.horizontal, 16)
@@ -62,6 +113,26 @@ struct ExploreView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .task {
+            if vm.templates.isEmpty {
+                await vm.loadAll()
+            }
+        }
+    }
+
+    // MARK: - Data
+
+    private var filteredTemplates: [WorkoutTemplate] {
+        let byTab = vm.templates.filter { $0.visibility.lowercased() == selectedTab.visibilityValue }
+
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return byTab }
+
+        return byTab.filter {
+            $0.title.lowercased().contains(q) ||
+            $0.description.lowercased().contains(q) ||
+            $0.goalTags.joined(separator: " ").lowercased().contains(q)
+        }
     }
 
     // MARK: - UI
@@ -112,9 +183,7 @@ struct ExploreView: View {
     private var segmentedTabs: some View {
         HStack(spacing: 10) {
             ForEach(ExploreTab.allCases) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
+                Button { selectedTab = tab } label: {
                     Text(tab.rawValue)
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundColor(selectedTab == tab ? .black : .white.opacity(0.85))
@@ -128,7 +197,6 @@ struct ExploreView: View {
                 }
                 .buttonStyle(.plain)
             }
-
             Spacer()
         }
     }
@@ -154,11 +222,108 @@ struct ExploreView: View {
                 )
         )
     }
+
+    private var programsList: some View {
+        VStack(spacing: 14) {
+            ForEach(filteredTemplates) { t in
+                NavigationLink {
+                    ProgramDetailView(template: t)
+                        .id(t.id)
+                } label: {
+                    ExploreProgramCard(
+                        title: t.title,
+                        subtitle: t.description,
+                        tags: buildTags(for: t),
+                        frequency: "\(t.frequencyPerWeek)x/sem",
+                        level: t.level,
+                        isPro: t.isPro,
+                        imageName: imageName(for: t)
+                    )
+                    // ✅ Hace que TODA la card sea tappable, incluso zonas “vacías”
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded {
+                    print("OPEN TEMPLATE:", t.id, "| title:", t.title)
+                })
+            }
+
+            if filteredTemplates.isEmpty {
+                emptyState
+            }
+        }
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView().tint(Color.appGreen.opacity(0.95))
+            Text("Cargando programas…")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+        }
+        .padding(.top, 18)
+    }
+
+    private func errorState(_ msg: String) -> some View {
+        VStack(spacing: 10) {
+            Text("No se pudo cargar")
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+
+            Text(msg)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+
+            Button { Task { await vm.loadAll() } } label: {
+                Text("Reintentar")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 14)
+                    .frame(height: 36)
+                    .background(Capsule().fill(Color.appGreen.opacity(0.95)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 18)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Text("No hay programas")
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+            Text("Probá con otra búsqueda o tab.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+        }
+        .padding(.top, 18)
+    }
+
+    // MARK: - Helpers
+
+    private func buildTags(for t: WorkoutTemplate) -> [String] {
+        var out: [String] = []
+        if t.isPro { out.append("PRO") }
+        out.append("\(t.weeks) \(t.weeks == 1 ? "Semana" : "Semanas")")
+        out.append(t.level)
+        out.append(contentsOf: t.goalTags)
+
+        var seen = Set<String>()
+        return out.filter { seen.insert($0).inserted }
+    }
+
+    private func imageName(for t: WorkoutTemplate) -> String? {
+        let lower = t.title.lowercased()
+        if lower.contains("candito") { return "program1" }
+        if lower.contains("juggernaut") { return "program2" }
+        return nil
+    }
 }
 
-// MARK: - Program Card
+// MARK: - Program Card (incluida acá para que exista)
 
-private struct ProgramCard: View {
+private struct ExploreProgramCard: View {
 
     let title: String
     let subtitle: String
@@ -166,7 +331,6 @@ private struct ProgramCard: View {
     let frequency: String
     let level: String
     let isPro: Bool
-
     let imageName: String?
 
     var body: some View {
@@ -178,35 +342,37 @@ private struct ProgramCard: View {
                 if isPro {
                     Badge(text: "PRO")
                         .padding(10)
+                        .allowsHitTesting(false)
                 }
             }
 
             Text(title)
                 .font(.system(size: 17, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
+                .allowsHitTesting(false)
 
             Text(subtitle)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.55))
+                .allowsHitTesting(false)
 
             FlowTags(tags: tags)
+                .allowsHitTesting(false)
 
             HStack(spacing: 10) {
                 InfoMiniCard(title: "Frecuencia", value: frequency)
+                    .allowsHitTesting(false)
                 InfoMiniCard(title: "Nivel", value: level)
+                    .allowsHitTesting(false)
 
                 Spacer()
 
-                Button {
-                    print("ver programa")
-                } label: {
-                    Text("Ver")
-                        .font(.system(size: 13, weight: .heavy, design: .rounded))
-                        .foregroundColor(.black)
-                        .frame(width: 64, height: 36)
-                        .background(Capsule().fill(Color.appGreen.opacity(0.95)))
-                }
-                .buttonStyle(.plain)
+                Text("Ver")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                    .frame(width: 64, height: 36)
+                    .background(Capsule().fill(Color.appGreen.opacity(0.95)))
+                    .allowsHitTesting(false)
             }
         }
         .padding(14)
@@ -243,6 +409,7 @@ private struct ProgramCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
+        .allowsHitTesting(false)
     }
 }
 
@@ -306,5 +473,7 @@ private struct InfoMiniCard: View {
 // MARK: - Preview
 
 #Preview {
-    ExploreView()
+    NavigationStack {
+        ExploreView()
+    }
 }

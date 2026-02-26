@@ -253,7 +253,6 @@ private struct FeedPost: Identifiable {
     let visibility: String
     let timeAgo: String
 
-    // ✅ 3 perfiles distintos (Amigos)
     static let mockFriends: [FeedPost] = [
         .init(
             imageName: "feed1",

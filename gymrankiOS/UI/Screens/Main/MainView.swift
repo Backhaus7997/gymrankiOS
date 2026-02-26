@@ -764,40 +764,14 @@ private struct TrainingCalendarCard: View {
 
 // MARK: - Sets per muscle
 
-private struct MuscleSetStat: Identifiable, Hashable {
-    let id = UUID()
-    let name: String
-    var sets: Int
-}
-
 private struct SetsPerMuscleCard: View {
 
-    @State private var stats: [MuscleSetStat] = [
-        .init(name: "Pecho", sets: 8),
-        .init(name: "Espalda", sets: 6),
-        .init(name: "Femorales", sets: 0),
-        .init(name: "Hombros", sets: 5),
-        .init(name: "Bíceps", sets: 0),
-        .init(name: "Tríceps", sets: 4),
-        .init(name: "Abdomen", sets: 0),
-        .init(name: "Glúteos", sets: 0),
-        .init(name: "Cuadriceps", sets: 2),
-        .init(name: "Pantorrillas", sets: 1),
-        .init(name: "Trapecios", sets: 0),
-        .init(name: "Antebrazos", sets: 1)
-    ]
-
+    @EnvironmentObject private var session: SessionManager
+    @StateObject private var vm = SetsPerMuscleViewModel()
     @State private var expanded = false
 
-    private var sortedItems: [MuscleSetStat] {
-        stats.sorted {
-            if $0.sets != $1.sets { return $0.sets > $1.sets }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
-    }
-
     private var shownItems: [MuscleSetStat] {
-        expanded ? sortedItems : Array(sortedItems.prefix(4))
+        expanded ? vm.stats : Array(vm.stats.prefix(4))
     }
 
     private var gridColumns: [GridItem] {
@@ -811,6 +785,15 @@ private struct SetsPerMuscleCard: View {
         }
         .padding(14)
         .background(outerBackground)
+        .task { await loadIfPossible() }
+    }
+
+    private func loadIfPossible() async {
+        let uid = session.userId
+        guard !uid.isEmpty else { return }
+        if vm.stats.isEmpty && !vm.isLoading {
+            await vm.load(userId: uid)
+        }
     }
 
     private var headerView: some View {
@@ -834,34 +817,48 @@ private struct SetsPerMuscleCard: View {
 
     private var innerBoxView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            gridView
-            toggleButton
+
+            if session.userId.isEmpty {
+                Text("Iniciá sesión para ver tus sets.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(.vertical, 6)
+
+            } else if vm.isLoading {
+                Text("Calculando...")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(.vertical, 6)
+
+            } else if let err = vm.errorMessage {
+                Text(err)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(.vertical, 6)
+
+            } else {
+                LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 10) {
+                    ForEach(shownItems) { item in
+                        MuscleSetPill(name: item.name, value: item.sets)
+                    }
+                }
+
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+                        expanded.toggle()
+                    }
+                } label: {
+                    Text(expanded ? "Ver menos" : "Ver más")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundColor(Color.appGreen.opacity(0.95))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(innerBackground)
-    }
-
-    private var gridView: some View {
-        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 10) {
-            ForEach(shownItems) { item in
-                MuscleSetPill(name: item.name, value: item.sets)
-            }
-        }
-    }
-
-    private var toggleButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                expanded.toggle()
-            }
-        } label: {
-            Text(expanded ? "Ver menos" : "Ver más")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .foregroundColor(Color.appGreen.opacity(0.95))
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 2)
     }
 
     private var innerBackground: some View {
@@ -882,7 +879,6 @@ private struct SetsPerMuscleCard: View {
             )
     }
 }
-
 private struct MuscleSetPill: View {
     let name: String
     let value: Int
