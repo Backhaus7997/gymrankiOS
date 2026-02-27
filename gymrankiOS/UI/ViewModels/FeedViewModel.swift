@@ -12,7 +12,7 @@ final class FeedViewModel: ObservableObject {
     @Published var isLoadingPublic: Bool = false
     @Published var errorMessagePublic: String? = nil
 
-    // 🔥 Estado local para el botón (AGREGAR / PENDIENTE / AMIGOS / BLOQUEADO)
+    // Estado del botón por uid (requested/accepted/blocked)
     @Published private(set) var relationByUid: [String: FriendStatus] = [:]
 
     private let feedRepo: FeedRepository
@@ -27,8 +27,8 @@ final class FeedViewModel: ObservableObject {
     }
 
     func loadPublic(myUid: String) async {
-        let cleanUid = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanUid.isEmpty else {
+        let me = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !me.isEmpty else {
             publicItems = []
             relationByUid = [:]
             return
@@ -39,13 +39,13 @@ final class FeedViewModel: ObservableObject {
         defer { isLoadingPublic = false }
 
         do {
-            // 1) relaciones mías
-            let rels = try await friendRepo.fetchRelations(myUid: cleanUid)
+            // 1) relaciones mías (para pintar botones)
+            let rels = try await friendRepo.fetchRelations(myUid: me)
             relationByUid = Dictionary(uniqueKeysWithValues: rels.map { ($0.otherUid, $0.status) })
 
-            // 2) perfiles públicos + sus últimas 3 rutinas
+            // 2) perfiles + últimas rutinas (solo si el perfil es PUBLIC)
             publicItems = try await feedRepo.fetchPublicFeedProfiles(
-                excludingUid: cleanUid,
+                excludingUid: me,
                 limitUsers: 30,
                 limitRoutinesPerUser: 3
             )
@@ -67,7 +67,7 @@ final class FeedViewModel: ObservableObject {
 
         do {
             try await friendRepo.sendRequest(myUid: me, to: other)
-            relationByUid[other] = .requested // ✅ actualizar UI instantáneo
+            relationByUid[other] = .requested // update UI instant
         } catch {
             errorMessagePublic = error.localizedDescription
         }

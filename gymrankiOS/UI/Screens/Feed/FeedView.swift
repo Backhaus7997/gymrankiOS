@@ -55,8 +55,8 @@ struct FeedView: View {
                                     onAddFriend: {
                                         Task { await vm.sendRequest(myUid: uid, to: item.profile.uid) }
                                     },
-                                    onOpenRoutine: { routine in
-                                        print("open routine \(routine.id) of \(item.profile.uid)")
+                                    onOpenRoutine: { routinePreview in
+                                        print("open routine \(routinePreview.id) of \(item.profile.uid)")
                                     }
                                 )
                             }

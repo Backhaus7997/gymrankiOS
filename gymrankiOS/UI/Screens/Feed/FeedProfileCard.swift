@@ -9,14 +9,24 @@ struct FeedProfileCard: View {
     let onAddFriend: () -> Void
     let onOpenRoutine: (FeedRoutinePreview) -> Void
 
+    @State private var showMore = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerPlaceholder
             authorRow
-            routinesSection
+            lastRoutineSection
+            moreButtonSection
         }
         .padding(14)
         .background(cardBg)
+        .sheet(isPresented: $showMore) {
+            FeedRoutinesSheet(
+                username: item.profile.displayName,
+                routines: Array(item.latestRoutines.prefix(3)),
+                onOpenRoutine: onOpenRoutine
+            )
+        }
     }
 
     // MARK: - Header (placeholder)
@@ -61,7 +71,6 @@ struct FeedProfileCard: View {
         }
     }
 
-    // ✅ Botón AGREGAR / PENDIENTE / AMIGOS
     private var addButton: some View {
         let isMe = item.profile.uid == myUid
         if isMe { return AnyView(EmptyView()) }
@@ -107,40 +116,56 @@ struct FeedProfileCard: View {
         .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
     }
 
-    // MARK: - Routines (ahora previews)
-    private var routinesSection: some View {
-        VStack(spacing: 12) {
-            if item.latestRoutines.isEmpty {
+    // MARK: - Solo el ÚLTIMO entrenamiento
+    private var lastRoutineSection: some View {
+        Group {
+            if let last = item.latestRoutines.first {
+                Button {
+                    onOpenRoutine(last) // si no querés que abra nada al tocar, decime y lo saco
+                } label: {
+                    routineCard(last)
+                }
+                .buttonStyle(.plain)
+            } else {
                 Text("Todavía no hay entrenamientos para mostrar.")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                let top3 = Array(item.latestRoutines.prefix(3))
-                ForEach(top3, id: \.id) { r in
-                    Button {
-                        onOpenRoutine(r)
-                    } label: {
-                        routineRow(r)
-                    }
-                    .buttonStyle(.plain)
-                }
             }
         }
     }
 
-    private func routineRow(_ r: FeedRoutinePreview) -> some View {
+    // MARK: - Ver más entrenamientos (única CTA)
+    private var moreButtonSection: some View {
+        Group {
+            if item.latestRoutines.count > 1 {
+                Button { showMore = true } label: {
+                    Text("Ver más entrenamientos")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(Color.appGreen.opacity(0.95))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Routine card (preview)
+    private func routineCard(_ r: FeedRoutinePreview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+
             Text(r.title)
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
 
             VStack(spacing: 8) {
-                ForEach(r.exercisesSummary) { ex in
+                ForEach(Array(r.exercisesSummary.prefix(3)), id: \.id) { ex in
                     HStack {
                         Text(ex.name)
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.90))
+                            .lineLimit(1)
 
                         Spacer()
 
@@ -154,10 +179,6 @@ struct FeedProfileCard: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.06), lineWidth: 1))
                 }
             }
-
-            Text("Ver entrenamiento completo →")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .foregroundColor(Color.appGreen.opacity(0.95))
 
             Text("Público • \(r.timeAgo)")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))

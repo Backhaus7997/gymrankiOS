@@ -2,8 +2,6 @@
 //  FeedRepository.swift
 //  gymrankiOS
 //
-//  Created by Martin Backhaus on 17/02/2026.
-//
 
 import Foundation
 import FirebaseFirestore
@@ -15,12 +13,12 @@ final class FeedRepository {
 
     private let db = Firestore.firestore()
 
-    // MARK: - Public users
+    // MARK: - Users (para tab Público)
 
-    func fetchPublicUsers(limit: Int = 30) async throws -> [UserProfile] {
+    /// Trae usuarios (sin filtrar por feedVisibility). La UI decide qué muestra.
+    func fetchUsers(limit: Int = 30) async throws -> [UserProfile] {
         let snap = try await db.collection("users")
-            .whereField("feedVisibility", isEqualTo: "PUBLIC")
-            .limit(to: max(1, min(limit, 100)))
+            .limit(to: max(1, min(limit, 200)))
             .getDocuments()
 
         return snap.documents.compactMap { doc in
@@ -30,112 +28,120 @@ final class FeedRepository {
 
     // MARK: - Friends (accepted)
 
-    func fetchAcceptedFriendUids(myUid: String) async throws -> [String] {
-        let clean = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return [] }
+    func fetchFriendsUids(myUid: String) async throws -> [String] {
+        let me = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !me.isEmpty else { return [] }
 
         let snap = try await db.collection("users")
-            .document(clean)
+            .document(me)
             .collection("friends")
-            .whereField("status", isEqualTo: "accepted")
+            .whereField("status", isEqualTo: FriendStatus.accepted.rawValue)
             .getDocuments()
 
-        // documentId suele ser friendUid, pero también soportamos otherUid field
-        return snap.documents.compactMap { d in
-            (d.data()["otherUid"] as? String) ?? d.documentID
-        }
+        return snap.documents.map { ($0.data()["otherUid"] as? String) ?? $0.documentID }
     }
 
     // MARK: - Latest routines per user (preview)
 
-    func fetchLatestRoutines(for uid: String, limit: Int = 3) async throws -> [FeedRoutinePreview] {
+    /// Devuelve previews de rutinas. OJO: limita la cantidad de rutinas, NO la cantidad de ejercicios.
+    func fetchLatestRoutinePreviews(for uid: String, limit: Int = 3) async throws -> [FeedRoutinePreview] {
         let clean = uid.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
 
         let snap = try await db.collection("users")
             .document(clean)
             .collection("routines")
+            .whereField("authorFeedVisibility", isEqualTo: "PUBLIC") // solo rutinas públicas
             .order(by: "createdAt", descending: true)
             .limit(to: max(1, min(limit, 10)))
             .getDocuments()
 
         return snap.documents.map { doc in
-            Self.mapRoutineDocToPreview(doc)
+            let d = doc.data()
+
+            let title = (d["title"] as? String) ?? "Entrenamiento"
+            let createdAt = (d["createdAt"] as? Timestamp)?.dateValue()
+
+            // ✅ TODOS los ejercicios (NO prefix(3) acá)
+            let exercises = d["exercises"] as? [[String: Any]] ?? []
+            let summary: [FeedWorkoutExercise] = exercises.map { ex in
+                let name = (ex["name"] as? String) ?? "-"
+
+                // reps puede venir Int o Double
+                let repsInt: Int = {
+                    if let v = ex["reps"] as? Int { return v }
+                    if let v = ex["reps"] as? Double { return Int(v) }
+                    return 0
+                }()
+
+                let usesBW = (ex["usesBodyweight"] as? Bool) ?? false
+
+                // weightKg puede venir Int o Double
+                let weightString: String = {
+                    if usesBW { return "BW" }
+                    if let v = ex["weightKg"] as? Int { return "\(v) kg" }
+                    if let v = ex["weightKg"] as? Double { return "\(Int(v)) kg" }
+                    return "—"
+                }()
+
+                let reps = repsInt > 0 ? "\(repsInt)" : "—"
+
+                return FeedWorkoutExercise(
+                    name: name,
+                    reps: reps,
+                    weight: weightString
+                )
+            }
+
+            return FeedRoutinePreview(
+                id: doc.documentID,
+                title: title,
+                createdAt: createdAt,
+                exercisesSummary: summary,
+                timeAgo: Self.timeAgo(from: createdAt)
+            )
         }
     }
 
-    // MARK: - Public feed profiles (1 card per profile)
+    // MARK: - Public feed (1 card por perfil)
 
+    /// Devuelve 1 item por perfil. Rutinas SOLO si el perfil tiene feedVisibility == PUBLIC.
     func fetchPublicFeedProfiles(
         excludingUid myUid: String,
         limitUsers: Int = 30,
         limitRoutinesPerUser: Int = 3
     ) async throws -> [FeedProfileItem] {
 
-        // 1) traer usuarios públicos
-        let usersSnap = try await db.collection("users")
-            .whereField("feedVisibility", isEqualTo: "PUBLIC")
-            .limit(to: max(1, min(limitUsers, 100)))
-            .getDocuments()
+        let me = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let profiles: [UserProfile] = usersSnap.documents.compactMap {
-            UserProfile.fromFirestore(docId: $0.documentID, data: $0.data())
-        }
-        .filter { $0.uid != myUid }
+        // 1) usuarios (sin filtrar por feedVisibility)
+        let profiles = try await fetchUsers(limit: limitUsers)
+            .filter { !$0.uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { $0.uid != me }
 
         var out: [FeedProfileItem] = []
         out.reserveCapacity(profiles.count)
 
-        // 2) por cada perfil, traer sus últimas rutinas públicas
         for p in profiles {
-            let routinesSnap = try await db.collection("users")
-                .document(p.uid)
-                .collection("routines")
-                .whereField("authorFeedVisibility", isEqualTo: "PUBLIC")
-                .order(by: "createdAt", descending: true)
-                .limit(to: max(0, min(limitRoutinesPerUser, 10)))
-                .getDocuments()
+            // 2) rutinas solo si el usuario es PUBLIC
+            let isPublicProfile = (p.feedVisibility == .public)
 
-            // ✅ ACA estaba el bug: devolvías WorkoutRoutine, pero FeedProfileItem espera FeedRoutinePreview
-            let routines: [FeedRoutinePreview] = routinesSnap.documents.map { doc in
-                Self.mapRoutineDocToPreview(doc)
-            }
+            let routines: [FeedRoutinePreview] = isPublicProfile
+                ? (try await fetchLatestRoutinePreviews(for: p.uid, limit: limitRoutinesPerUser))
+                : []
 
             out.append(.init(profile: p, latestRoutines: routines))
         }
 
-        return out
-    }
-
-    // MARK: - Mapping helpers
-
-    private static func mapRoutineDocToPreview(_ doc: QueryDocumentSnapshot) -> FeedRoutinePreview {
-        let d = doc.data()
-
-        let title = (d["title"] as? String) ?? "Entrenamiento"
-        let createdAt = (d["createdAt"] as? Timestamp)?.dateValue()
-
-        let exercises = d["exercises"] as? [[String: Any]] ?? []
-        let summary: [FeedWorkoutExercise] = exercises.prefix(3).map { ex in
-            let name = (ex["name"] as? String) ?? "-"
-            let repsInt = (ex["reps"] as? Int) ?? 0
-            let usesBW = (ex["usesBodyweight"] as? Bool) ?? false
-            let w = ex["weightKg"] as? Int
-
-            let reps = repsInt > 0 ? "\(repsInt)" : "—"
-            let weight: String = usesBW ? "BW" : (w != nil ? "\(w!) kg" : "—")
-
-            return FeedWorkoutExercise(name: name, reps: reps, weight: weight)
+        // ordenar por actividad (el más reciente arriba)
+        return out.sorted {
+            let d0 = $0.latestRoutines.first?.createdAt ?? .distantPast
+            let d1 = $1.latestRoutines.first?.createdAt ?? .distantPast
+            return d0 > d1
         }
-
-        return FeedRoutinePreview(
-            id: doc.documentID,
-            title: title,
-            createdAt: createdAt,
-            exercisesSummary: summary,
-            timeAgo: Self.timeAgo(from: createdAt)
-        )
     }
+
+    // MARK: - Helpers
 
     private static func timeAgo(from date: Date?) -> String {
         guard let date else { return "—" }
