@@ -1,3 +1,7 @@
+//  WorkoutRoutine.swift
+//  gymrankiOS
+//
+
 import Foundation
 
 struct WorkoutRoutine: Identifiable, Codable {
@@ -8,6 +12,7 @@ struct WorkoutRoutine: Identifiable, Codable {
     var createdAt: Date?
     var updatedAt: Date?
     var exercises: [RoutineExercise]
+    var authorFeedVisibility: String?
 
     init(
         id: String = UUID().uuidString,
@@ -16,7 +21,8 @@ struct WorkoutRoutine: Identifiable, Codable {
         description: String? = nil,
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
-        exercises: [RoutineExercise] = []
+        exercises: [RoutineExercise] = [],
+        authorFeedVisibility: String? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -25,6 +31,7 @@ struct WorkoutRoutine: Identifiable, Codable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.exercises = exercises
+        self.authorFeedVisibility = authorFeedVisibility
     }
 }
 
@@ -58,7 +65,6 @@ struct RoutineExercise: Identifiable, Codable, Equatable {
         self.reps = reps
         self.usesBodyweight = usesBodyweight
         self.weightKg = weightKg
-
         self.weekday = weekday
         self.muscles = muscles
     }

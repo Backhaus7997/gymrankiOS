@@ -10,15 +10,14 @@ import FirebaseAuth
 
 struct MainView: View {
 
+    @EnvironmentObject private var session: SessionManager
+
     let onGoToWorkout: () -> Void
     let onGoToRanking: () -> Void
 
     private let sideMargin: CGFloat = 12
 
-    @State private var showLogoutPopup = false
-    @State private var logoutErrorMessage: String?
-    @State private var showLogoutError = false
-
+    @State private var showProfileSheet = false
     @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
 
     var body: some View {
@@ -30,7 +29,7 @@ struct MainView: View {
 
                 VStack(spacing: 14) {
 
-                    TopBar(onTapProfile: { showLogoutPopup = true })
+                    TopBar(onTapProfile: { showProfileSheet = true })
                         .frame(width: contentWidth, alignment: .center)
                         .padding(.top, 10)
 
@@ -61,32 +60,15 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .confirmationDialog(
-            "Cuenta",
-            isPresented: $showLogoutPopup,
-            titleVisibility: .visible
-        ) {
-            Button("Cerrar sesión", role: .destructive) {
-                do {
-                    try AuthService.shared.logout()
-                    RoutineStorage.clear()
-                } catch {
-                    logoutErrorMessage = (error as NSError).localizedDescription
-                    showLogoutError = true
-                }
-            }
-
-            Button("Cancelar", role: .cancel) { }
-        } message: {
-            Text("¿Querés cerrar sesión?")
+        .fullScreenCover(isPresented: $showProfileSheet) {
+            ProfileSheet(onLogout: { RoutineStorage.clear() })
+                .environmentObject(session)
+                .background(Color.clear) // opcional
         }
-        .alert("No se pudo cerrar sesión", isPresented: $showLogoutError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(logoutErrorMessage ?? "Ocurrió un error.")
+        .environmentObject(session)
         }
     }
-}
+
 
 // MARK: - Top bar
 
@@ -670,11 +652,8 @@ private struct RoutineDayPicker: View {
         List {
             ForEach(RoutineMuscle.allCases) { m in
                 Button {
-                    if selected.contains(m) {
-                        selected.remove(m)
-                    } else {
-                        selected.insert(m)
-                    }
+                    if selected.contains(m) { selected.remove(m) }
+                    else { selected.insert(m) }
                 } label: {
                     HStack {
                         Text(m.rawValue)
@@ -879,6 +858,7 @@ private struct SetsPerMuscleCard: View {
             )
     }
 }
+
 private struct MuscleSetPill: View {
     let name: String
     let value: Int
@@ -917,4 +897,5 @@ private struct MuscleSetPill: View {
         onGoToWorkout: {},
         onGoToRanking: {}
     )
+    .environmentObject(SessionManager())
 }

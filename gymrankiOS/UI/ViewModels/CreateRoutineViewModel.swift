@@ -12,7 +12,6 @@ final class CreateRoutineViewModel: ObservableObject {
     @Published var description: String = ""
 
     /// IMPORTANTE: cada RoutineExercise debe tener id único.
-    /// Si tu RoutineExercise() no genera UUID, esto igual te protege porque acá lo regeneramos al crear.
     @Published var exercises: [RoutineExercise] = [
         RoutineExercise(id: UUID().uuidString)
     ]
@@ -28,10 +27,8 @@ final class CreateRoutineViewModel: ObservableObject {
     }
 
     func removeExercise(id: String) {
-        // Si hay ids duplicados, removeAll elimina todos los duplicados y evita inconsistencias
         exercises.removeAll { $0.id == id }
 
-        // opcional: mantener siempre 1 card visible
         if exercises.isEmpty {
             exercises = [RoutineExercise(id: UUID().uuidString)]
         }
@@ -86,7 +83,6 @@ final class CreateRoutineViewModel: ObservableObject {
                 }
             }
 
-            // Por las dudas: si algún ejercicio quedó con id vacío/duplicado, lo regeneramos
             if cleanedExercises[i].id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 cleanedExercises[i].id = UUID().uuidString
             }
@@ -107,13 +103,14 @@ final class CreateRoutineViewModel: ObservableObject {
                     : description.trimmingCharacters(in: .whitespacesAndNewlines),
                 createdAt: now,
                 updatedAt: now,
-                exercises: cleanedExercises
+                exercises: cleanedExercises,
+                authorFeedVisibility: nil // ✅ se completa en RoutineRepository leyendo el user
             )
 
             try await repo.createRoutine(routine)
             didSave = true
 
-            // opcional: reset form
+            // reset form
             title = ""
             description = ""
             exercises = [RoutineExercise(id: UUID().uuidString)]

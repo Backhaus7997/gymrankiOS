@@ -1,119 +1,117 @@
+//
+//  RoutineRepository.swift
+//  gymrankiOS
+//
+
 import Foundation
 import FirebaseFirestore
 
 final class RoutineRepository {
+
     private let db = Firestore.firestore()
 
+    /// Crea una rutina en: users/{uid}/routines/{routineId}
+    /// y agrega authorFeedVisibility leyendo users/{uid}.feedVisibility
     func createRoutine(_ routine: WorkoutRoutine) async throws {
-        let routineId = routine.id.isEmpty ? UUID().uuidString : routine.id
+        let uid = routine.userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else { throw NSError(domain: "RoutineRepository", code: 1, userInfo: [NSLocalizedDescriptionKey: "userId vacío"]) }
 
-        let ref = db
-            .collection("users")
-            .document(routine.userId)
-            .collection("routines")
-            .document(routineId)
+        // 1) leer visibilidad del user (snapshot)
+        let userDoc = try await db.collection("users").document(uid).getDocument()
+        let feedVisibility = (userDoc.data()?["feedVisibility"] as? String) ?? "PUBLIC"
 
-        // ✅ Guardar TODOS los campos que necesitamos (incluye weekday + muscles + exerciseId)
-        let exercisesArray: [[String: Any]] = routine.exercises.map { ex in
-            var dict: [String: Any] = [
+        // 2) armar payload
+        let now = Date()
+        let createdAt = routine.createdAt ?? now
+        let updatedAt = routine.updatedAt ?? now
+
+        let exercisesPayload: [[String: Any]] = routine.exercises.map { ex in
+            return [
                 "id": ex.id,
                 "exerciseId": ex.exerciseId as Any,
                 "name": ex.name,
                 "sets": ex.sets,
                 "reps": ex.reps,
                 "usesBodyweight": ex.usesBodyweight,
-
-                // ✅ NUEVOS
-                "weekday": ex.weekday,          // Int 1...7
-                "muscles": ex.muscles           // [String]
+                "weightKg": ex.weightKg as Any,
+                "weekday": ex.weekday,
+                "muscles": ex.muscles
             ]
-
-            dict["weightKg"] = ex.usesBodyweight ? NSNull() : (ex.weightKg as Any)
-            return dict
         }
 
         let data: [String: Any] = [
-            "userId": routine.userId,
+            "id": routine.id,
+            "userId": uid,
             "title": routine.title,
             "description": routine.description as Any,
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp(),
-            "exercises": exercisesArray
+            "createdAt": Timestamp(date: createdAt),
+            "updatedAt": Timestamp(date: updatedAt),
+            "authorFeedVisibility": feedVisibility, // ✅ acá queda “creado”
+            "exercises": exercisesPayload
         ]
 
-        try await ref.setData(data, merge: true)
+        // 3) guardar
+        try await db.collection("users")
+            .document(uid)
+            .collection("routines")
+            .document(routine.id)
+            .setData(data, merge: true)
     }
 
+    // (Opcional) Listar rutinas del usuario
     func fetchRoutines(userId: String) async throws -> [WorkoutRoutine] {
-        let snap = try await db
-            .collection("users")
-            .document(userId)
+        let uid = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else { return [] }
+
+        let snap = try await db.collection("users")
+            .document(uid)
             .collection("routines")
-            .order(by: "createdAt", descending: true)
+            .order(by: "updatedAt", descending: true)
             .getDocuments()
 
-        return snap.documents.map { doc in
-            let data = doc.data()
+        return snap.documents.compactMap { doc in
+            let d = doc.data()
 
-            let title = data["title"] as? String ?? "Sin título"
+            let createdAt = (d["createdAt"] as? Timestamp)?.dateValue()
+            let updatedAt = (d["updatedAt"] as? Timestamp)?.dateValue()
 
-            let description: String? = {
-                let raw = data["description"]
-                if raw is NSNull { return nil }
-                return raw as? String
-            }()
-
-            let createdAtTS = data["createdAt"] as? Timestamp
-            let updatedAtTS = data["updatedAt"] as? Timestamp
-
-            let exercisesRaw = data["exercises"] as? [[String: Any]] ?? []
-            let exercises: [RoutineExercise] = exercisesRaw.map { ex in
-
-                let usesBodyweight = ex["usesBodyweight"] as? Bool ?? false
-
-                // ✅ weightKg puede venir como Int o como Double según Firestore
-                let weightKg: Int? = {
-                    if usesBodyweight { return nil }
-                    if let i = ex["weightKg"] as? Int { return i }
-                    if let d = ex["weightKg"] as? Double { return Int(d) }
-                    return nil
-                }()
-
-                // ✅ NUEVOS (con defaults seguros)
-                let weekday: Int = ex["weekday"] as? Int ?? 0
-                let muscles: [String] = ex["muscles"] as? [String] ?? []
-                let exerciseId: String? = {
-                    let raw = ex["exerciseId"]
-                    if raw is NSNull { return nil }
-                    return raw as? String
-                }()
-
-                return RoutineExercise(
-                    id: ex["id"] as? String ?? UUID().uuidString,
-                    exerciseId: exerciseId,
-                    name: ex["name"] as? String ?? "",
-                    sets: ex["sets"] as? Int ?? 3,
-                    reps: ex["reps"] as? Int ?? 10,
-                    usesBodyweight: usesBodyweight,
-                    weightKg: weightKg,
-
-                    // ✅ NUEVOS
-                    weekday: weekday,
-                    muscles: muscles
+            let exercises: [RoutineExercise] = (d["exercises"] as? [[String: Any]] ?? []).map { ex in
+                RoutineExercise(
+                    id: (ex["id"] as? String) ?? UUID().uuidString,
+                    exerciseId: ex["exerciseId"] as? String,
+                    name: (ex["name"] as? String) ?? "",
+                    sets: (ex["sets"] as? Int) ?? 3,
+                    reps: (ex["reps"] as? Int) ?? 10,
+                    usesBodyweight: (ex["usesBodyweight"] as? Bool) ?? false,
+                    weightKg: ex["weightKg"] as? Int,
+                    weekday: (ex["weekday"] as? Int) ?? 2,
+                    muscles: (ex["muscles"] as? [String]) ?? []
                 )
             }
 
-            let storedUserId = data["userId"] as? String ?? userId
-
             return WorkoutRoutine(
-                id: doc.documentID,
-                userId: storedUserId,
-                title: title,
-                description: description,
-                createdAt: createdAtTS?.dateValue(),
-                updatedAt: updatedAtTS?.dateValue(),
-                exercises: exercises
+                id: (d["id"] as? String) ?? doc.documentID,
+                userId: (d["userId"] as? String) ?? uid,
+                title: (d["title"] as? String) ?? "Rutina",
+                description: d["description"] as? String,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                exercises: exercises,
+                authorFeedVisibility: d["authorFeedVisibility"] as? String
             )
         }
+    }
+
+    // (Opcional) Borrar rutina
+    func deleteRoutine(userId: String, routineId: String) async throws {
+        let uid = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rid = routineId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty, !rid.isEmpty else { return }
+
+        try await db.collection("users")
+            .document(uid)
+            .collection("routines")
+            .document(rid)
+            .delete()
     }
 }
