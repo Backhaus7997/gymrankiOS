@@ -76,7 +76,6 @@ private struct RoutineCardPreviewView: View {
                 .font(.system(size: 24, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
 
-            // ✅ TODOS LOS EJERCICIOS DEL ENTRENAMIENTO (no recorta)
             VStack(spacing: 8) {
                 ForEach(routine.exercisesSummary) { ex in
                     ExerciseRowPreviewView(name: ex.name, reps: ex.reps, weight: ex.weight)
