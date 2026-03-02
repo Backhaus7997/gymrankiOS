@@ -26,7 +26,7 @@ final class FeedRepository {
         }
     }
 
-    // MARK: - Friends (accepted)
+    // MARK: - Friends (accepted uids)
 
     func fetchFriendsUids(myUid: String) async throws -> [String] {
         let me = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -41,9 +41,8 @@ final class FeedRepository {
         return snap.documents.map { ($0.data()["otherUid"] as? String) ?? $0.documentID }
     }
 
-    // MARK: - Latest routines per user (preview)
+    // MARK: - Latest routines per user (preview) PUBLIC ONLY (para tab Público)
 
-    /// Devuelve previews de rutinas. OJO: limita la cantidad de rutinas, NO la cantidad de ejercicios.
     func fetchLatestRoutinePreviews(for uid: String, limit: Int = 3) async throws -> [FeedRoutinePreview] {
         let clean = uid.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
@@ -62,35 +61,18 @@ final class FeedRepository {
             let title = (d["title"] as? String) ?? "Entrenamiento"
             let createdAt = (d["createdAt"] as? Timestamp)?.dateValue()
 
-            // ✅ TODOS los ejercicios (NO prefix(3) acá)
+            // ✅ OJO: acá NO limitamos ejercicios (para "ver más entrenamientos" querés todos)
             let exercises = d["exercises"] as? [[String: Any]] ?? []
             let summary: [FeedWorkoutExercise] = exercises.map { ex in
                 let name = (ex["name"] as? String) ?? "-"
-
-                // reps puede venir Int o Double
-                let repsInt: Int = {
-                    if let v = ex["reps"] as? Int { return v }
-                    if let v = ex["reps"] as? Double { return Int(v) }
-                    return 0
-                }()
-
+                let repsInt = (ex["reps"] as? Int) ?? 0
                 let usesBW = (ex["usesBodyweight"] as? Bool) ?? false
-
-                // weightKg puede venir Int o Double
-                let weightString: String = {
-                    if usesBW { return "BW" }
-                    if let v = ex["weightKg"] as? Int { return "\(v) kg" }
-                    if let v = ex["weightKg"] as? Double { return "\(Int(v)) kg" }
-                    return "—"
-                }()
+                let w = ex["weightKg"] as? Int
 
                 let reps = repsInt > 0 ? "\(repsInt)" : "—"
+                let weight: String = usesBW ? "BW" : (w != nil ? "\(w!) kg" : "—")
 
-                return FeedWorkoutExercise(
-                    name: name,
-                    reps: reps,
-                    weight: weightString
-                )
+                return FeedWorkoutExercise(name: name, reps: reps, weight: weight)
             }
 
             return FeedRoutinePreview(
@@ -106,12 +88,7 @@ final class FeedRepository {
     // MARK: - Public feed (1 card por perfil)
 
     /// Devuelve 1 item por perfil. Rutinas SOLO si el perfil tiene feedVisibility == PUBLIC.
-    func fetchPublicFeedProfiles(
-        excludingUid myUid: String,
-        limitUsers: Int = 30,
-        limitRoutinesPerUser: Int = 3
-    ) async throws -> [FeedProfileItem] {
-
+    func fetchPublicFeedProfiles(excludingUid myUid: String, limitUsers: Int = 30, limitRoutinesPerUser: Int = 3) async throws -> [FeedProfileItem] {
         let me = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 1) usuarios (sin filtrar por feedVisibility)
@@ -133,7 +110,7 @@ final class FeedRepository {
             out.append(.init(profile: p, latestRoutines: routines))
         }
 
-        // ordenar por actividad (el más reciente arriba)
+        // ordenar por actividad
         return out.sorted {
             let d0 = $0.latestRoutines.first?.createdAt ?? .distantPast
             let d1 = $1.latestRoutines.first?.createdAt ?? .distantPast
@@ -141,7 +118,103 @@ final class FeedRepository {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Friends feed (1 card por perfil, solo accepted)
+
+    /// Devuelve 1 item por cada amigo aceptado. Rutinas visibles para AMIGOS:
+    /// - Si el perfil está PRIVATE => no devolvemos rutinas
+    /// - Si está PUBLIC o FRIENDS_ONLY => devolvemos rutinas (filtrando por authorFeedVisibility)
+    func fetchFriendFeedProfiles(myUid: String, limitRoutinesPerUser: Int = 3) async throws -> [FeedProfileItem] {
+        let me = myUid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !me.isEmpty else { return [] }
+
+        let friendUids = try await fetchFriendsUids(myUid: me)
+        guard !friendUids.isEmpty else { return [] }
+
+        // traer perfiles de amigos en batches de 10 (whereIn)
+        let chunks = friendUids.chunked(into: 10)
+        var profiles: [UserProfile] = []
+        profiles.reserveCapacity(friendUids.count)
+
+        for chunk in chunks {
+            let snap = try await db.collection("users")
+                .whereField("uid", in: chunk)
+                .getDocuments()
+
+            profiles.append(contentsOf: snap.documents.compactMap {
+                UserProfile.fromFirestore(docId: $0.documentID, data: $0.data())
+            })
+        }
+
+        // 1 item por perfil
+        var out: [FeedProfileItem] = []
+        out.reserveCapacity(profiles.count)
+
+        for p in profiles {
+            let canSeeRoutines: Bool = (p.feedVisibility != .private)
+
+            let routines: [FeedRoutinePreview] = canSeeRoutines
+                ? (try await fetchLatestRoutinePreviewsForFriendContext(uid: p.uid, limit: limitRoutinesPerUser))
+                : []
+
+            out.append(.init(profile: p, latestRoutines: routines))
+        }
+
+        // ordenar por actividad
+        return out.sorted {
+            let d0 = $0.latestRoutines.first?.createdAt ?? .distantPast
+            let d1 = $1.latestRoutines.first?.createdAt ?? .distantPast
+            return d0 > d1
+        }
+    }
+
+    /// Amigos: traemos latest 10 por createdAt y filtramos en cliente por authorFeedVisibility
+    /// para no depender de índice compuesto extra.
+    private func fetchLatestRoutinePreviewsForFriendContext(uid: String, limit: Int) async throws -> [FeedRoutinePreview] {
+        let clean = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return [] }
+
+        let snap = try await db.collection("users")
+            .document(clean)
+            .collection("routines")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 10)
+            .getDocuments()
+
+        // visibles para amigos
+        let allowed: Set<String> = ["PUBLIC", "FRIENDS_ONLY"]
+
+        let mapped: [FeedRoutinePreview] = snap.documents.compactMap { doc in
+            let d = doc.data()
+            let vis = (d["authorFeedVisibility"] as? String) ?? "PUBLIC"
+            guard allowed.contains(vis) else { return nil }
+
+            let title = (d["title"] as? String) ?? "Entrenamiento"
+            let createdAt = (d["createdAt"] as? Timestamp)?.dateValue()
+
+            // ✅ NO limitar ejercicios
+            let exercises = d["exercises"] as? [[String: Any]] ?? []
+            let summary: [FeedWorkoutExercise] = exercises.map { ex in
+                let name = (ex["name"] as? String) ?? "-"
+                let repsInt = (ex["reps"] as? Int) ?? 0
+                let usesBW = (ex["usesBodyweight"] as? Bool) ?? false
+                let w = ex["weightKg"] as? Int
+
+                let reps = repsInt > 0 ? "\(repsInt)" : "—"
+                let weight: String = usesBW ? "BW" : (w != nil ? "\(w!) kg" : "—")
+                return FeedWorkoutExercise(name: name, reps: reps, weight: weight)
+            }
+
+            return FeedRoutinePreview(
+                id: doc.documentID,
+                title: title,
+                createdAt: createdAt,
+                exercisesSummary: summary,
+                timeAgo: Self.timeAgo(from: createdAt)
+            )
+        }
+
+        return Array(mapped.prefix(max(0, min(limit, 10))))
+    }
 
     private static func timeAgo(from date: Date?) -> String {
         guard let date else { return "—" }
@@ -153,5 +226,19 @@ final class FeedRepository {
         if hours < 24 { return "Hace \(hours) h" }
         let days = hours / 24
         return "Hace \(days) d"
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        var result: [[Element]] = []
+        var idx = 0
+        while idx < count {
+            let end = Swift.min(idx + size, count)
+            result.append(Array(self[idx..<end]))
+            idx = end
+        }
+        return result
     }
 }

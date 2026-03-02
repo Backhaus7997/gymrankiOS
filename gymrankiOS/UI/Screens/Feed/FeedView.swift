@@ -6,7 +6,7 @@ struct FeedView: View {
 
     let bottomInset: CGFloat
 
-    @State private var selected: Segment = .publico
+    @State private var selected: Segment = .amigos
     @StateObject private var vm = FeedViewModel()
 
     enum Segment: String, CaseIterable, Identifiable {
@@ -16,7 +16,7 @@ struct FeedView: View {
     }
 
     private var uid: String { session.userId }
-    
+
     var body: some View {
         ZStack {
             AppBackground().ignoresSafeArea()
@@ -25,41 +25,15 @@ struct FeedView: View {
                 segmentedTop
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 14) {
+
+                        // ✅ Buscar (para ambos tabs)
+                        searchSection
 
                         if selected == .amigos {
-                            // ✅ Tab de amigos (ya lo tenés funcionando)
-                            ProfilesTabView(myUid: uid)
-
+                            friendsContent
                         } else {
-                            // ✅ Público
-
-                            if let err = vm.errorMessagePublic, !err.isEmpty {
-                                Text(err)
-                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                    .foregroundColor(.red.opacity(0.9))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            if vm.isLoadingPublic {
-                                SwiftUI.ProgressView()
-                                    .tint(Color.appGreen.opacity(0.95))
-                                    .padding(.top, 6)
-                            }
-
-                            ForEach(vm.publicItems) { item in
-                                FeedProfileCard(
-                                    item: item,
-                                    myUid: uid,
-                                    status: vm.relationshipStatus(with: item.profile.uid),
-                                    onAddFriend: {
-                                        Task { await vm.sendRequest(myUid: uid, to: item.profile.uid) }
-                                    },
-                                    onOpenRoutine: { routinePreview in
-                                        print("open routine \(routinePreview.id) of \(item.profile.uid)")
-                                    }
-                                )
-                            }
+                            publicContent
                         }
 
                         Spacer().frame(height: bottomInset + 90)
@@ -71,32 +45,143 @@ struct FeedView: View {
             .padding(.top, 8)
         }
         .navigationBarBackButtonHidden(true)
-        .task {
-            if selected == .publico {
-                await vm.loadPublic(myUid: uid)
+        .task { await initialLoad() }
+        .onChange(of: selected) { _ in Task { await reloadForTab() } }
+        .onChange(of: uid) { _ in Task { await reloadForTab() } }
+    }
+
+    // MARK: - Search UI
+
+    private var searchSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Buscar")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.92))
+
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.white.opacity(0.55))
+
+                TextField("Buscar por username", text: $vm.searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .foregroundColor(.white.opacity(0.92))
+
+                if !vm.searchText.isEmpty {
+                    Button { vm.searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.appGreen.opacity(0.18), lineWidth: 1)
+                    )
+            )
         }
-        .onChange(of: selected) { newValue in
-            if newValue == .publico {
-                Task { await vm.loadPublic(myUid: uid) }
+    }
+
+    // MARK: - Friends content (same cards)
+
+    private var friendsContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+
+            if let err = vm.errorMessageFriends, !err.isEmpty {
+                Text(err)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.red.opacity(0.9))
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .onChange(of: uid) { _ in
-            // si cambia sesión, refrescamos el público
-            if selected == .publico {
-                Task { await vm.loadPublic(myUid: uid) }
+
+            if vm.isLoadingFriends {
+                SwiftUI.ProgressView()
+                    .tint(Color.appGreen.opacity(0.95))
+                    .padding(.top, 6)
+            }
+
+            if !vm.isLoadingFriends && vm.friendsItemsFiltered.isEmpty {
+                Text(vm.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                     ? "Todavía no tenés amigos."
+                     : "No se encontraron resultados.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(vm.friendsItemsFiltered) { item in
+                    FeedProfileCard(
+                        item: item,
+                        myUid: uid,
+                        status: vm.relationshipStatus(with: item.profile.uid),
+                        onAddFriend: {
+                            Task { await vm.sendRequest(myUid: uid, to: item.profile.uid) }
+                        },
+                        onOpenRoutine: { routine in
+                            print("open routine \(routine.id) of \(item.profile.uid)")
+                        }
+                    )
+                }
             }
         }
     }
 
-    // MARK: - Segmented (arriba)
+    // MARK: - Public content
+
+    private var publicContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+
+            if let err = vm.errorMessagePublic, !err.isEmpty {
+                Text(err)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.red.opacity(0.9))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if vm.isLoadingPublic {
+                SwiftUI.ProgressView()
+                    .tint(Color.appGreen.opacity(0.95))
+                    .padding(.top, 6)
+            }
+
+            if !vm.isLoadingPublic && vm.publicItemsFiltered.isEmpty {
+                Text(vm.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                     ? "No hay usuarios para mostrar."
+                     : "No se encontraron resultados.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(vm.publicItemsFiltered) { item in
+                    FeedProfileCard(
+                        item: item,
+                        myUid: uid,
+                        status: vm.relationshipStatus(with: item.profile.uid),
+                        onAddFriend: {
+                            Task { await vm.sendRequest(myUid: uid, to: item.profile.uid) }
+                        },
+                        onOpenRoutine: { routine in
+                            print("open routine \(routine.id) of \(item.profile.uid)")
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Segmented top
 
     private var segmentedTop: some View {
         HStack(spacing: 0) {
             ForEach(Segment.allCases) { seg in
-                Button {
-                    selected = seg
-                } label: {
+                Button { selected = seg } label: {
                     VStack(spacing: 10) {
                         Text(seg.rawValue)
                             .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -114,5 +199,21 @@ struct FeedView: View {
             }
         }
         .padding(.horizontal, 16)
+    }
+
+    // MARK: - Load helpers
+
+    private func initialLoad() async {
+        await reloadForTab()
+    }
+
+    private func reloadForTab() async {
+        guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        if selected == .amigos {
+            await vm.loadFriends(myUid: uid)
+        } else {
+            await vm.loadPublic(myUid: uid)
+        }
     }
 }
