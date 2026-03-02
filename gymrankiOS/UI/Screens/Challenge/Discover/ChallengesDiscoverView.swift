@@ -1,11 +1,51 @@
 //
-//  DiscoverView.swift
+//  ChallengesDiscoverView.swift
 //  gymrankiOS
-//
-//  Created by Martin Backhaus on 10/02/2026.
 //
 
 import SwiftUI
+
+// MARK: - VM
+
+@MainActor
+final class ChallengesDiscoverVM: ObservableObject {
+    @Published var isLoading = false
+    @Published var templates: [ChallengeTemplate] = []
+    @Published var joinedActiveTemplateIds: Set<String> = []
+    @Published var joinedTemplateIds: Set<String> = []
+    @Published var libraryTemplates: [ChallengeTemplate] = []
+    @Published var errorMessage: String?
+
+    private let repo = ChallengeRepository()
+
+    func load(uid: String) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            async let activeTemplatesTask = repo.fetchActiveTemplates()
+            async let activeUserChallengesTask = repo.fetchUserChallenges(uid: uid, onlyActive: true)
+
+            let (activeTemplates, activeUserChallenges) = try await (activeTemplatesTask, activeUserChallengesTask)
+
+            self.templates = activeTemplates
+            self.joinedActiveTemplateIds = Set(activeUserChallenges.map { $0.templateId })
+
+            // Traigo TODOS los challenges del usuario (para filtrar Discover y armar biblioteca)
+            let allUserChallenges = try await repo.fetchUserChallenges(uid: uid, onlyActive: false)
+            self.joinedTemplateIds = Set(allUserChallenges.map { $0.templateId })
+
+            let ids = Array(Set(allUserChallenges.map { $0.templateId }))
+            self.libraryTemplates = try await repo.fetchTemplates(byIds: ids)
+
+        } catch {
+            self.errorMessage = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - View
 
 struct ChallengesDiscoverView: View {
 
@@ -16,19 +56,43 @@ struct ChallengesDiscoverView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var session: SessionManager
+
+    @StateObject private var vm = ChallengesDiscoverVM()
+
     @State private var selected: Segment = .discover
     @State private var query: String = ""
+    @State private var selectedTemplate: ChallengeTemplate? = nil
 
-    private var challenges: [ChallengeItem] {
-        // en un futuro: si selected == .library -> otra data
-        let base = ChallengeItem.mock
-        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return base }
-        let q = query.lowercased()
-        return base.filter {
+    private var uid: String { session.userId }
+
+    /// ✅ Base list según segmento + filtro para que Discover no muestre los ya agregados
+    private var baseList: [ChallengeTemplate] {
+        switch selected {
+        case .discover:
+            return vm.templates.filter { !vm.joinedTemplateIds.contains($0.id) }
+        case .library:
+            return vm.libraryTemplates
+        }
+    }
+
+    private var filtered: [ChallengeTemplate] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return baseList }
+
+        return baseList.filter {
             $0.title.lowercased().contains(q) ||
             $0.subtitle.lowercased().contains(q) ||
-            $0.level.rawValue.lowercased().contains(q)
+            $0.levelDisplay.lowercased().contains(q) ||
+            $0.tags.contains(where: { $0.lowercased().contains(q) })
         }
+    }
+
+    private var showError: Binding<Bool> {
+        Binding(
+            get: { vm.errorMessage != nil },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )
     }
 
     var body: some View {
@@ -41,7 +105,7 @@ struct ChallengesDiscoverView: View {
                 searchBar
 
                 HStack {
-                    Text("Total: \(challenges.count)")
+                    Text("Total: \(filtered.count)")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(0.55))
                     Spacer()
@@ -50,8 +114,15 @@ struct ChallengesDiscoverView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
-                        ForEach(challenges) { item in
-                            ChallengeCard(item: item)
+                        ForEach(filtered, id: \.self) { item in
+                            ChallengeCard(
+                                template: item,
+                                /// En biblioteca puede que sea completed/cancelled; igualmente “ya lo tiene”
+                                isInLibrary: vm.joinedTemplateIds.contains(item.id),
+                                isActive: vm.joinedActiveTemplateIds.contains(item.id)
+                            ) {
+                                selectedTemplate = item
+                            }
                         }
                         Spacer().frame(height: 22)
                     }
@@ -59,8 +130,40 @@ struct ChallengesDiscoverView: View {
                     .padding(.bottom, 14)
                 }
             }
+
+            if vm.isLoading {
+                VStack {
+                    SwiftUI.ProgressView().tint(.white.opacity(0.9))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.15))
+            }
+        }
+        .task {
+            let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanUid.isEmpty else { return }
+            await vm.load(uid: cleanUid)
         }
         .navigationBarBackButtonHidden(true)
+        .navigationDestination(item: $selectedTemplate) { tpl in
+            ChallengeDetailView(
+                template: tpl,
+                /// ✅ Deshabilita “Unirme” si YA lo agregó alguna vez
+                isJoined: vm.joinedTemplateIds.contains(tpl.id),
+                onJoined: {
+                    Task {
+                        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !cleanUid.isEmpty else { return }
+                        await vm.load(uid: cleanUid)
+                    }
+                }
+            )
+        }
+        .alert("Error", isPresented: showError, actions: {
+            Button("OK") { vm.errorMessage = nil }
+        }, message: {
+            Text(vm.errorMessage ?? "")
+        })
     }
 
     // MARK: - TopBar
@@ -153,38 +256,48 @@ struct ChallengesDiscoverView: View {
 // MARK: - Card
 
 private struct ChallengeCard: View {
-    let item: ChallengeItem
+    let template: ChallengeTemplate
+    let isInLibrary: Bool
+    let isActive: Bool
+    let onTap: () -> Void
 
     var body: some View {
         Button {
-            print("open challenge \(item.title)")
+            onTap()
         } label: {
             HStack(spacing: 12) {
+
                 imageThumb
 
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(item.title)
+                    HStack(spacing: 8) {
+                        Text(template.title)
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
                             .foregroundColor(.white.opacity(0.95))
                             .lineLimit(1)
 
                         Spacer()
 
-                        if item.isHot {
-                            Text("🔥")
-                                .font(.system(size: 16))
+                        if template.hotDisplay {
+                            Text("🔥").font(.system(size: 16))
+                        }
+
+                        // Badge “ya lo tiene”
+                        if isInLibrary {
+                            Image(systemName: isActive ? "checkmark.seal.fill" : "checkmark.circle.fill")
+                                .foregroundColor(Color.appGreen.opacity(0.95))
+                                .font(.system(size: 14, weight: .bold))
                         }
                     }
 
-                    Text(item.subtitle)
+                    Text(template.subtitle)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(2)
 
                     HStack(spacing: 8) {
-                        TagPill(text: item.level.rawValue)
-                        TagPill(text: item.durationText)
+                        TagPill(text: template.levelDisplay)
+                        TagPill(text: template.durationText)
                         Spacer()
                     }
                 }
@@ -207,7 +320,7 @@ private struct ChallengeCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.black.opacity(0.35))
 
-            if let name = item.imageName {
+            if let name = template.imageName, !name.isEmpty {
                 Image(name)
                     .resizable()
                     .scaledToFill()
@@ -215,7 +328,7 @@ private struct ChallengeCard: View {
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
-                Image(systemName: item.fallbackIcon)
+                Image(systemName: fallbackIcon)
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundColor(.white.opacity(0.25))
             }
@@ -225,6 +338,14 @@ private struct ChallengeCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
+    }
+
+    private var fallbackIcon: String {
+        let tags = template.tags.map { $0.lowercased() }
+        if tags.contains(where: { $0.contains("run") || $0.contains("running") }) { return "figure.run" }
+        if tags.contains(where: { $0.contains("stretch") || $0.contains("mobility") }) { return "figure.cooldown" }
+        if tags.contains(where: { $0.contains("warmup") }) { return "flame.fill" }
+        return "flag.checkered"
     }
 }
 
@@ -240,83 +361,7 @@ private struct TagPill: View {
             .background(
                 Capsule()
                     .fill(Color.appGreen.opacity(0.18))
-                    .overlay(
-                        Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1)
-                    )
+                    .overlay(Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1))
             )
-    }
-}
-
-// MARK: - Model
-
-private struct ChallengeItem: Identifiable {
-    enum Level: String {
-        case principiante = "Principiante"
-        case intermedio = "Intermedio"
-        case avanzado = "Avanzado"
-        case experto = "Experto"
-    }
-
-    let id = UUID()
-    let title: String
-    let subtitle: String
-    let level: Level
-    let durationDays: Int
-    let isHot: Bool
-
-    /// Nombre del asset (Assets.xcassets). Ej: "challenge_walk", "challenge_dumbbell"
-    /// Si es nil, se usa fallbackIcon (SF Symbol).
-    let imageName: String?
-
-    /// SF Symbol fallback (si imageName == nil)
-    let fallbackIcon: String
-
-    var durationText: String { "\(durationDays) DÍAS" }
-
-    // ✅ Asigná acá los nombres de tus assets
-    // Cargás imágenes en Assets con esos nombres y automáticamente reemplazan los símbolos.
-    static let mock: [ChallengeItem] = [
-        .init(
-            title: "Los 50 diarios",
-            subtitle: "Completá el desafío de peso corporal de 50 días",
-            level: .intermedio,
-            durationDays: 50,
-            isHot: true,
-            imageName: "challenge1",
-            fallbackIcon: "figure.walk"
-        ),
-        .init(
-            title: "Desafío 75 Hard",
-            subtitle: "Un desafío para fortalecer la mentalidad",
-            level: .experto,
-            durationDays: 75,
-            isHot: false,
-            imageName: "challenge2",
-            fallbackIcon: "dumbbell.fill"
-        ),
-        .init(
-            title: "Quemá entre 500–750 kcal por día…",
-            subtitle: "Quemá 500–750 kcal diarias con pasos y cardio",
-            level: .avanzado,
-            durationDays: 30,
-            isHot: false,
-            imageName: "challenge3",
-            fallbackIcon: "flame.fill"
-        ),
-        .init(
-            title: "10.000 pasos diarios",
-            subtitle: "Caminá al menos 10k pasos todos los días",
-            level: .principiante,
-            durationDays: 21,
-            isHot: false,
-            imageName: "challenge4",
-            fallbackIcon: "figure.walk.motion"
-        )
-    ]
-}
-
-#Preview {
-    NavigationStack {
-        ChallengesDiscoverView()
     }
 }
