@@ -1,90 +1,225 @@
+//
+//  MissionsView.swift
+//  gymrankiOS
+//
+
 import SwiftUI
+
+@MainActor
+final class MissionsVM: ObservableObject {
+    @Published var isLoading = false
+    @Published var templates: [MissionTemplate] = []
+    @Published var libraryTemplates: [MissionTemplate] = []
+
+    /// activos (si querés marcar)
+    @Published var joinedActiveTemplateIds: Set<String> = []
+
+    /// todos los que ya aceptó (para ocultar en Descubrir)
+    @Published var joinedTemplateIds: Set<String> = []
+
+    @Published var errorMessage: String?
+
+    private let repo = MissionRepository()
+
+    func load(uid: String) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            async let activeTemplatesTask = repo.fetchActiveTemplates()
+            async let activeUserTask = repo.fetchUserMissions(uid: uid, onlyActive: true)
+
+            let (activeTemplates, activeUser) = try await (activeTemplatesTask, activeUserTask)
+
+            self.templates = activeTemplates
+            self.joinedActiveTemplateIds = Set(activeUser.map { $0.templateId })
+
+            let allUser = try await repo.fetchUserMissions(uid: uid, onlyActive: false)
+            self.joinedTemplateIds = Set(allUser.map { $0.templateId })
+
+            let ids = Array(Set(allUser.map { $0.templateId }))
+            self.libraryTemplates = try await repo.fetchTemplates(byIds: ids)
+
+        } catch {
+            self.errorMessage = error.localizedDescription
+        }
+    }
+
+    func createAndJoinCustom(uid: String, draft: MissionDraft) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            let templateId = try await repo.createCustomTemplate(uid: uid, draft: draft)
+            try await repo.joinMission(uid: uid, templateId: templateId)
+            await load(uid: uid)
+        } catch {
+            self.errorMessage = error.localizedDescription
+        }
+    }
+}
 
 struct MissionsView: View {
 
+    enum Segment: String, CaseIterable, Identifiable {
+        case discover = "Descubrir"
+        case library = "Mi biblioteca"
+        var id: String { rawValue }
+    }
+
     @Environment(\.dismiss) private var dismiss
-    @State private var showCreateMissionPopup: Bool = false
+    @EnvironmentObject private var session: SessionManager
 
-    private let sidePadding: CGFloat = 16
+    @StateObject private var vm = MissionsVM()
 
-    private let programs: [ProgramItem] = [
-        .init(title: "Candito - Fuerza 6 Sem.", subtitle: "Ideal para testear 1RM y competir", tag: "PRO", frequency: "4x/sem", level: "Intermedio", imageName: "feed1"),
-        .init(title: "Juggernaut - Deadlift", subtitle: "Enfocado a levantar más en 16 semanas", tag: "PRO", frequency: "4x/sem", level: "Avanzado", imageName: "feed2"),
-        .init(title: "Upper Hypertrophy", subtitle: "Volumen para torso y estética", tag: "Gratis", frequency: "5x/sem", level: "Intermedio", imageName: "feed3"),
-        .init(title: "Full Body Strength", subtitle: "Fuerza general y progresiva", tag: "Gratis", frequency: "3x/sem", level: "Principiante", imageName: "feed4"),
-        .init(title: "Core + Estabilidad", subtitle: "Abdomen + postura + control", tag: "PRO", frequency: "3x/sem", level: "Intermedio", imageName: "feed5"),
-        .init(title: "Powerbuilding 8 Sem.", subtitle: "Fuerza + hipertrofia balanceada", tag: "PRO", frequency: "4x/sem", level: "Avanzado", imageName: "feed6"),
-        .init(title: "Glúteos y Pierna", subtitle: "Enfoque en lower body", tag: "Gratis", frequency: "3x/sem", level: "Principiante", imageName: "gym1"),
-        .init(title: "Strong Back", subtitle: "Espalda fuerte + prevención", tag: "PRO", frequency: "3x/sem", level: "Intermedio", imageName: "gym2"),
-        .init(title: "Push/Pull/Legs", subtitle: "Split clásico con progresión", tag: "Gratis", frequency: "6x/sem", level: "Avanzado", imageName: "gym3"),
-        .init(title: "Hypertrophy Upper", subtitle: "Torso con buen volumen", tag: "PRO", frequency: "4x/sem", level: "Intermedio", imageName: "gym4"),
-        .init(title: "Conditioning", subtitle: "Cardio + resistencia", tag: "Gratis", frequency: "3x/sem", level: "Principiante", imageName: "gym5"),
-        .init(title: "Olympic Basics", subtitle: "Técnica de levantamientos", tag: "PRO", frequency: "3x/sem", level: "Intermedio", imageName: "gym6")
-    ]
+    @State private var selected: Segment = .discover
+    @State private var query: String = ""
+
+    @State private var selectedTemplate: MissionTemplate? = nil
+    @State private var showCreateMissionPopup = false
+
+    private var uid: String { session.userId.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var baseList: [MissionTemplate] {
+        switch selected {
+        case .discover:
+            // ✅ ocultar las ya aceptadas
+            return vm.templates.filter { !vm.joinedTemplateIds.contains($0.id) }
+        case .library:
+            return vm.libraryTemplates
+        }
+    }
+
+    private var filtered: [MissionTemplate] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return baseList }
+        return baseList.filter {
+            $0.title.lowercased().contains(q) ||
+            $0.subtitle.lowercased().contains(q) ||
+            $0.levelDisplay.lowercased().contains(q) ||
+            $0.tags.contains(where: { $0.lowercased().contains(q) })
+        }
+    }
+
+    private var showError: Binding<Bool> {
+        Binding(
+            get: { vm.errorMessage != nil },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )
+    }
 
     var body: some View {
         ZStack {
             AppBackground().ignoresSafeArea()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
+                topBar
+                segmented
+                searchBar
 
-                headerFixed
-                    .padding(.horizontal, sidePadding)
-                    .padding(.top, 10)
+                HStack {
+                    Text("Total: \(filtered.count)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
 
-                Divider()
-                    .overlay(Color.white.opacity(0.08))
-                    .padding(.horizontal, sidePadding)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        ForEach(filtered, id: \.self) { item in
+                            MissionCard(
+                                template: item,
+                                isInLibrary: vm.joinedTemplateIds.contains(item.id),
+                                isActive: vm.joinedActiveTemplateIds.contains(item.id)
+                            ) {
+                                selectedTemplate = item
+                            }
+                        }
+                        Spacer().frame(height: 22)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+                }
+            }
 
-                missionsScroll
+            if vm.isLoading {
+                VStack { SwiftUI.ProgressView().tint(.white.opacity(0.9)) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.15))
             }
         }
+        .task {
+            guard !uid.isEmpty else { return }
+            await vm.load(uid: uid)
+        }
         .safeAreaInset(edge: .bottom) {
-            createMissionButton
-                .padding(.horizontal, sidePadding)
-                .padding(.bottom, 12)
+            Button {
+                showCreateMissionPopup = true
+            } label: {
+                Text("Crear misión")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.appGreen.opacity(0.95))
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
         .overlay {
             if showCreateMissionPopup {
                 CenterModalOverlay(isPresented: $showCreateMissionPopup) {
                     CreateMissionPopupCard(
                         onClose: { showCreateMissionPopup = false },
-                        onNext: { selected in
-                            print("siguiente: \(selected)")
+                        onNext: { draft in
                             showCreateMissionPopup = false
+                            guard !uid.isEmpty else { return }
+                            Task { await vm.createAndJoinCustom(uid: uid, draft: draft) }
                         }
                     )
                     .padding(.horizontal, 18)
                 }
             }
         }
+        .navigationDestination(item: $selectedTemplate) { tpl in
+            MissionDetailView(
+                template: tpl,
+                isJoined: vm.joinedTemplateIds.contains(tpl.id),
+                onJoined: {
+                    Task { await vm.load(uid: uid) }
+                }
+            )
+        }
+        .alert("Error", isPresented: showError, actions: {
+            Button("OK") { vm.errorMessage = nil }
+        }, message: {
+            Text(vm.errorMessage ?? "")
+        })
         .navigationBarBackButtonHidden(true)
     }
 
-    // MARK: - Header (no scrollea)
-
-    private var headerFixed: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            topBar
-            headerCard
-            chipsRow
-            searchBar
-        }
-    }
+    // MARK: Top bar
 
     private var topBar: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.white.opacity(0.9))
+                    .foregroundColor(.white.opacity(0.92))
                     .frame(width: 40, height: 40)
                     .background(Circle().fill(Color.white.opacity(0.06)))
                     .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
             }
             .buttonStyle(.plain)
 
-            Text("Desafíos")
+            Text("Misiones")
                 .font(.system(size: 22, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
 
@@ -99,245 +234,162 @@ struct MissionsView: View {
             }
             .buttonStyle(.plain)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
     }
 
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Programas y rutinas")
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
+    // MARK: Segmented
 
-            Text("Elegí un programa y empezá hoy.")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                )
-        )
-    }
-
-    private var chipsRow: some View {
+    private var segmented: some View {
         HStack(spacing: 10) {
-            Chip(text: "Oficial", isActive: true)
-            Chip(text: "Comunidad", isActive: false)
-            Spacer()
+            ForEach(Segment.allCases) { seg in
+                Button {
+                    selected = seg
+                } label: {
+                    Text(seg.rawValue)
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(selected == seg ? .white.opacity(0.95) : .white.opacity(0.65))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(selected == seg ? Color.appGreen.opacity(0.22) : Color.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(selected == seg ? Color.appGreen.opacity(0.55) : Color.white.opacity(0.10), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 16)
     }
+
+    // MARK: Search
 
     private var searchBar: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(.white.opacity(0.55))
-
-            Text("Buscar programas...")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.45))
 
-            Spacer()
+            TextField("Buscar misiones", text: $query)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.white.opacity(0.35))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 14)
-        .frame(height: 52)
+        .frame(height: 46)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.06))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
         )
-    }
-
-    // MARK: - Scroll SOLO misiones
-
-    private var missionsScroll: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 12) {
-                ForEach(programs) { item in
-                    ProgramCard(item: item)
-                }
-
-                Spacer().frame(height: 140)
-            }
-            .padding(.horizontal, sidePadding)
-            .padding(.top, 10)
-        }
-    }
-
-    // MARK: - Bottom fixed button
-
-    private var createMissionButton: some View {
-        Button {
-            showCreateMissionPopup = true
-        } label: {
-            Text("Crear misión")
-                .font(.system(size: 15, weight: .heavy, design: .rounded))
-                .foregroundColor(.black)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color.appGreen.opacity(0.95))
-                )
-        }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
     }
 }
 
-// MARK: - Models
+// MARK: - Mission card
 
-private struct ProgramItem: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String
-    let tag: String
-    let frequency: String
-    let level: String
-    let imageName: String?   // ✅ NUEVO (opcional)
-}
-
-// MARK: - Components (igual que antes)
-
-private struct Chip: View {
-    let text: String
+private struct MissionCard: View {
+    let template: MissionTemplate
+    let isInLibrary: Bool
     let isActive: Bool
+    let onTap: () -> Void
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: .heavy, design: .rounded))
-            .foregroundColor(isActive ? Color.appGreen.opacity(0.95) : .white.opacity(0.60))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                Capsule()
-                    .fill(isActive ? Color.appGreen.opacity(0.10) : Color.white.opacity(0.06))
-            )
-            .overlay(
-                Capsule().stroke(isActive ? Color.appGreen.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1)
-            )
-    }
-}
-
-private struct ProgramCard: View {
-    let item: ProgramItem
-
-    var body: some View {
-        VStack(spacing: 12) {
+        Button { onTap() } label: {
             HStack(spacing: 12) {
 
-                // ✅ MISMO CUADRADO, ahora soporta imagen
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.black.opacity(0.22))
-                    .frame(width: 72, height: 72)
-                    .overlay(
-                        Group {
-                            if let name = item.imageName {
-                                Image(name)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 72, height: 72)
-                                    .clipped()
-                            } else {
-                                Image(systemName: "figure.strengthtraining.traditional")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.35))
-                            }
-                        }
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                iconThumb
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 10) {
-                        Text(item.tag)
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .foregroundColor(item.tag == "PRO" ? .black : .white.opacity(0.85))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule().fill(item.tag == "PRO" ? Color.appGreen.opacity(0.90) : Color.white.opacity(0.08))
-                            )
-                            .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
-
-                        Text(item.title)
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white.opacity(0.92))
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(template.title)
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white.opacity(0.95))
                             .lineLimit(1)
 
                         Spacer()
 
-                        Button { print("ver \(item.title)") } label: {
-                            Text("Ver")
-                                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Capsule().fill(Color.appGreen.opacity(0.95)))
+                        if isInLibrary {
+                            Image(systemName: isActive ? "checkmark.seal.fill" : "checkmark.circle.fill")
+                                .foregroundColor(Color.appGreen.opacity(0.95))
+                                .font(.system(size: 14, weight: .bold))
                         }
-                        .buttonStyle(.plain)
                     }
 
-                    Text(item.subtitle)
+                    Text(template.subtitle)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(2)
+
+                    HStack(spacing: 8) {
+                        TagPill(text: template.levelDisplay)
+                        TagPill(text: template.durationText)
+                        TagPill(text: "\(template.points) pts")
+                        Spacer()
+                    }
                 }
             }
-
-            HStack(spacing: 12) {
-                StatMiniCard(title: "Frecuencia", value: item.frequency)
-                StatMiniCard(title: "Nivel", value: item.level)
-            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.appGreen.opacity(0.25), lineWidth: 1)
+                    )
+            )
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.appGreen.opacity(0.18), lineWidth: 1)
-                )
-        )
+        .buttonStyle(.plain)
+    }
+
+    private var iconThumb: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.35))
+
+            Image(systemName: "trophy.fill")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundColor(.white.opacity(0.25))
+        }
+        .frame(width: 70, height: 70)
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
     }
 }
 
-private struct StatMiniCard: View {
-    let title: String
-    let value: String
+private struct TagPill: View {
+    let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-
-            Text(value)
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.92))
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.black.opacity(0.18))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                )
-        )
-    }
-}
-
-#Preview {
-    NavigationStack {
-        MissionsView()
+        Text(text)
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .foregroundColor(.white.opacity(0.92))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .allowsTightening(true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color.appGreen.opacity(0.18))
+                    .overlay(
+                        Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1)
+                    )
+            )
+            .fixedSize(horizontal: true, vertical: false)
     }
 }

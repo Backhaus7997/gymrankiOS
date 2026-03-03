@@ -1,3 +1,8 @@
+//
+//  CreateMissionPopupCard.swift
+//  gymrankiOS
+//
+
 import SwiftUI
 
 /// Fondo oscuro + card centrada (popup real, no sheet)
@@ -23,82 +28,82 @@ struct CenterModalOverlay<Content: View>: View {
     }
 }
 
+// MARK: - Draft model (lo que sale del wizard)
+
+struct MissionDraft: Hashable {
+    let durationDays: Int           // 14 / 21 / 28
+    let focus: CreateMissionPopupCard.Focus
+
+    let goalWorkouts: Int           // objetivo sugerido (workouts)
+    let points: Int                 // 250 / 350 / 500
+
+    let title: String
+    let subtitle: String
+    let level: String               // derivado por duración
+    let tags: [String]
+}
+
 // MARK: - Create Mission Popup (Wizard)
 
 struct CreateMissionPopupCard: View {
 
-    // MARK: Steps
     private enum Step: Int, CaseIterable {
-        case type, difficulty, focus, summary
+        case duration, focus, details, summary
     }
 
-    // MARK: Models
-    enum MissionType: String, CaseIterable, Identifiable {
-        case daily = "DIARIA"
-        case short = "CORTA"
+    enum Duration: String, CaseIterable, Identifiable {
+        case d14 = "14 DÍAS"
+        case d21 = "21 DÍAS"
+        case d28 = "28 DÍAS"
         var id: String { rawValue }
+
+        var days: Int {
+            switch self {
+            case .d14: return 14
+            case .d21: return 21
+            case .d28: return 28
+            }
+        }
+
+        // ✅ dificultad derivada por duración (cambiable)
+        var levelLabel: String {
+            switch self {
+            case .d14: return "Fácil"
+            case .d21: return "Intermedio"
+            case .d28: return "Difícil"
+            }
+        }
+
+        // ✅ puntos fijos por duración
+        var points: Int {
+            switch self {
+            case .d14: return 250
+            case .d21: return 350
+            case .d28: return 500
+            }
+        }
 
         var icon: String {
             switch self {
-            case .daily: return "clock"
-            case .short: return "bolt.fill"
+            case .d14: return "calendar"
+            case .d21: return "calendar.badge.clock"
+            case .d28: return "calendar.badge.exclamationmark"
             }
         }
 
         var subtitle: String {
             switch self {
-            case .daily: return "24 horas"
-            case .short: return "Sprint 3 horas"
+            case .d14: return "\(levelLabel) • \(points) pts"
+            case .d21: return "\(levelLabel) • \(points) pts"
+            case .d28: return "\(levelLabel) • \(points) pts"
             }
         }
 
         var detail: String {
             switch self {
-            case .daily: return "Constancia"
-            case .short: return "Intensidad rápida"
-            }
-        }
-
-        var timeLimitLabel: String {
-            switch self {
-            case .daily: return "24 horas"
-            case .short: return "3 horas"
-            }
-        }
-    }
-
-    enum Difficulty: String, CaseIterable, Identifiable {
-        case easy = "FÁCIL"
-        case medium = "MEDIA"
-        case hard = "DIFÍCIL"
-        case extreme = "EXTREMA"
-        var id: String { rawValue }
-
-        var icon: String {
-            switch self {
-            case .easy: return "leaf.fill"
-            case .medium: return "pencil"
-            case .hard: return "flame.fill"
-            case .extreme: return "flame.circle.fill"
-            }
-        }
-
-        var eloMultiplier: String {
-            switch self {
-            case .easy: return "1.0x ELO"
-            case .medium: return "1.5x ELO"
-            case .hard: return "2.0x ELO"
-            case .extreme: return "3.0x ELO"
-            }
-        }
-
-        /// “Hasta +X ELO” (mock)
-        var maxEloReward: Int {
-            switch self {
-            case .easy: return 4
-            case .medium: return 6
-            case .hard: return 8
-            case .extreme: return 12
+            case .d14: return "Misión corta y accesible"
+            case .d21: return "Misión más exigente"
+            case .d28: return "Misión larga (alta recompensa)"
             }
         }
     }
@@ -106,16 +111,16 @@ struct CreateMissionPopupCard: View {
     enum Focus: String, CaseIterable, Identifiable {
         case upper = "TREN SUPERIOR"
         case lower = "TREN INFERIOR"
-        case abs = "ABDOMEN"
         case cardio = "CARDIO"
+        case mobility = "MOVILIDAD"
         var id: String { rawValue }
 
         var icon: String {
             switch self {
             case .upper: return "figure.boxing"
             case .lower: return "figure.run"
-            case .abs: return "flame.fill"
             case .cardio: return "waveform.path.ecg"
+            case .mobility: return "figure.cooldown"
             }
         }
 
@@ -123,8 +128,8 @@ struct CreateMissionPopupCard: View {
             switch self {
             case .upper: return "Brazos, pecho,\nespalda"
             case .lower: return "Piernas y\nglúteos"
-            case .abs: return "Core y\nabdominales"
-            case .cardio: return "Corazón y\npulmones"
+            case .cardio: return "Corazón y\nresistencia"
+            case .mobility: return "Flexibilidad\ny movilidad"
             }
         }
 
@@ -132,32 +137,39 @@ struct CreateMissionPopupCard: View {
             switch self {
             case .upper: return "Superior"
             case .lower: return "Inferior"
-            case .abs: return "Abdomen"
             case .cardio: return "Cardio"
+            case .mobility: return "Movilidad"
+            }
+        }
+
+        var tag: String {
+            switch self {
+            case .upper: return "upper"
+            case .lower: return "lower"
+            case .cardio: return "cardio"
+            case .mobility: return "mobility"
             }
         }
     }
 
-    // MARK: External callbacks
+    // callbacks
     let onClose: () -> Void
+    let onNext: (MissionDraft) -> Void
 
-    /// Se llama al final (Aceptar misión). Mantengo el mismo tipo (String) para que no te rompa el caller.
-    /// Ejemplo: "DIARIA|FÁCIL|TREN INFERIOR"
-    let onNext: (String) -> Void
-
-    // MARK: State
-    @State private var step: Step = .type
-
-    @State private var selectedType: MissionType = .daily
-    @State private var selectedDifficulty: Difficulty = .easy
+    // state
+    @State private var step: Step = .duration
+    @State private var selectedDuration: Duration = .d14
     @State private var selectedFocus: Focus = .lower
+
+    // inputs
+    @State private var titleInput: String = ""
+    @State private var subtitleInput: String = ""
 
     var body: some View {
         VStack(spacing: 14) {
             header
 
             ZStack {
-                // contenido cambia pero el contenedor queda igual
                 stepContent
                     .id(step)
                     .transition(.asymmetric(
@@ -182,7 +194,6 @@ struct CreateMissionPopupCard: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .accessibilityElement(children: .contain)
     }
 
     // MARK: Header
@@ -225,74 +236,50 @@ struct CreateMissionPopupCard: View {
 
     private var headerIcon: String {
         switch step {
-        case .type: return "trophy.fill"
-        case .difficulty: return "slider.horizontal.3"
+        case .duration: return "calendar"
         case .focus: return "scope"
+        case .details: return "text.quote"
         case .summary: return "trophy.fill"
         }
     }
 
     private var headerTitle: String {
         switch step {
-        case .type: return "Crear misión"
-        case .difficulty: return "Seleccionar dificultad"
+        case .duration: return "Crear misión"
         case .focus: return "Elegir enfoque"
-        case .summary: return "Resumen de misión"
+        case .details: return "Detalles"
+        case .summary: return "Resumen"
         }
     }
 
     private var headerSubtitle: String {
         switch step {
-        case .type: return "Elegí el tipo de misión"
-        case .difficulty: return "¿Qué tan desafiante querés que sea?"
-        case .focus: return "¿Qué grupo muscular querés trabajar?"
-        case .summary: return "Tu misión te espera"
+        case .duration: return "La dificultad y puntos dependen de la duración"
+        case .focus: return "¿Qué querés priorizar?"
+        case .details: return "Poné un nombre y descripción"
+        case .summary: return "Confirmá tu misión"
         }
     }
 
-    // MARK: Content per step
+    // MARK: Steps
 
     @ViewBuilder
     private var stepContent: some View {
         switch step {
-        case .type:
-            missionTypeStep
-        case .difficulty:
-            difficultyStep
-        case .focus:
-            focusStep
-        case .summary:
-            summaryStep
+        case .duration: durationStep
+        case .focus: focusStep
+        case .details: detailsStep
+        case .summary: summaryStep
         }
     }
 
-    private var missionTypeStep: some View {
-        HStack(spacing: 12) {
-            ForEach(MissionType.allCases) { type in
+    private var durationStep: some View {
+        VStack(spacing: 12) {
+            ForEach(Duration.allCases) { d in
                 Button {
-                    selectedType = type
+                    selectedDuration = d
                 } label: {
-                    MissionTypeCard(type: type, isSelected: selectedType == type)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var difficultyStep: some View {
-        let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-        return LazyVGrid(columns: cols, spacing: 12) {
-            ForEach(Difficulty.allCases) { d in
-                Button {
-                    selectedDifficulty = d
-                } label: {
-                    SelectCard(
-                        title: d.rawValue,
-                        subtitle: d.eloMultiplier,
-                        icon: d.icon,
-                        isSelected: selectedDifficulty == d
-                    )
+                    DurationRowCard(duration: d, isSelected: selectedDuration == d)
                 }
                 .buttonStyle(.plain)
             }
@@ -321,69 +308,97 @@ struct CreateMissionPopupCard: View {
         .padding(.top, 2)
     }
 
-    private var summaryStep: some View {
-        VStack(spacing: 12) {
+    private var detailsStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
 
-            Text("\(selectedType == .daily ? "Diaria" : "Corta") \(selectedDifficultyLabel) • \(selectedFocus.chipLabel)")
+            fieldLabel("Nombre de la misión")
+            TextField("Ej: Cardio post-entreno", text: $titleInput)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+                .padding(.horizontal, 14)
+                .frame(height: 46)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                )
+
+            fieldLabel("Descripción")
+            TextField("Ej: Completá X entrenos en Y días", text: $subtitleInput, axis: .vertical)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+                .lineLimit(3, reservesSpace: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                )
+
+            if !detailsValid {
+                Text("Completá nombre y descripción para continuar.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .foregroundColor(.white.opacity(0.70))
+    }
+
+    private var summaryStep: some View {
+        let goal = goalWorkoutsFor(duration: selectedDuration)
+
+        let cleanTitle = titleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSubtitle = subtitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return VStack(spacing: 12) {
+            Text(cleanTitle.isEmpty ? "Tu misión" : cleanTitle)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 2)
 
+            Text(cleanSubtitle.isEmpty ? "Agregá una descripción" : cleanSubtitle)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 6)
+
             HStack(spacing: 10) {
-                Chip(text: selectedDifficultyChip)
-                Chip(text: selectedTypeChip)
+                Chip(text: selectedDuration.rawValue)
+                Chip(text: selectedDuration.levelLabel)
                 Chip(text: selectedFocus.chipLabel)
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.bottom, 2)
 
             HStack(spacing: 12) {
                 InfoCard(
-                    icon: "clock",
-                    title: "Límite de tiempo",
-                    value: selectedType.timeLimitLabel
+                    icon: "target",
+                    title: "Objetivo",
+                    value: "\(goal) entrenos"
                 )
                 InfoCard(
                     icon: "star.fill",
-                    title: "Ganancia",
-                    value: "Hasta +\(selectedDifficulty.maxEloReward) ELO",
+                    title: "Recompensa",
+                    value: "\(selectedDuration.points) pts",
                     valueIsGreen: true
                 )
             }
         }
         .padding(.top, 2)
         .frame(maxWidth: .infinity)
-        .frame(height: 180, alignment: .top)
+        .frame(height: 220, alignment: .top)
     }
 
-
-    private var selectedDifficultyLabel: String {
-        switch selectedDifficulty {
-        case .easy: return "Easy"
-        case .medium: return "Media"
-        case .hard: return "Difícil"
-        case .extreme: return "Extrema"
-        }
-    }
-
-    private var selectedDifficultyChip: String {
-        switch selectedDifficulty {
-        case .easy: return "Easy"
-        case .medium: return "Media"
-        case .hard: return "Hard"
-        case .extreme: return "Extrema"
-        }
-    }
-
-    private var selectedTypeChip: String {
-        switch selectedType {
-        case .daily: return "Diaria"
-        case .short: return "Corta"
-        }
-    }
-
-    // MARK: Footer buttons
+    // MARK: Footer
 
     private var footerButtons: some View {
         VStack(spacing: 10) {
@@ -399,8 +414,10 @@ struct CreateMissionPopupCard: View {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .fill(Color.appGreen.opacity(0.95))
                     )
+                    .opacity(primaryEnabled ? 1.0 : 0.55)
             }
             .buttonStyle(.plain)
+            .disabled(!primaryEnabled)
 
             Button {
                 secondaryAction()
@@ -425,88 +442,117 @@ struct CreateMissionPopupCard: View {
     }
 
     private var primaryTitle: String {
-        switch step {
-        case .summary: return "ACEPTAR MISIÓN"
-        default: return "Siguiente"
-        }
+        step == .summary ? "CREAR MISIÓN" : "Siguiente"
     }
 
     private var secondaryTitle: String {
+        step == .duration ? "Cancelar" : "Volver"
+    }
+
+    private var detailsValid: Bool {
+        !titleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !subtitleInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var primaryEnabled: Bool {
         switch step {
-        case .type: return "Cancelar"
-        default: return "Volver"
+        case .details, .summary:
+            return detailsValid
+        default:
+            return true
         }
     }
 
     private func primaryAction() {
         switch step {
-        case .type:
-            withAnimation { step = .difficulty }
-        case .difficulty:
+        case .duration:
             withAnimation { step = .focus }
         case .focus:
+            withAnimation { step = .details }
+        case .details:
             withAnimation { step = .summary }
         case .summary:
-            // Emitimos un string para no romper tu caller actual
-            let payload = "\(selectedType.rawValue)|\(selectedDifficulty.rawValue)|\(selectedFocus.rawValue)"
-            onNext(payload)
+            let goal = goalWorkoutsFor(duration: selectedDuration)
+
+            let cleanTitle = titleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanSubtitle = subtitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let draft = MissionDraft(
+                durationDays: selectedDuration.days,
+                focus: selectedFocus,
+                goalWorkouts: goal,
+                points: selectedDuration.points,
+                title: cleanTitle,
+                subtitle: cleanSubtitle,
+                level: selectedDuration.levelLabel,
+                tags: ["mission", "custom", selectedFocus.tag, "d\(selectedDuration.days)"]
+            )
+            onNext(draft)
         }
     }
 
     private func secondaryAction() {
         switch step {
-        case .type:
+        case .duration:
             onClose()
-        case .difficulty:
-            withAnimation { step = .type }
         case .focus:
-            withAnimation { step = .difficulty }
-        case .summary:
+            withAnimation { step = .duration }
+        case .details:
             withAnimation { step = .focus }
+        case .summary:
+            withAnimation { step = .details }
+        }
+    }
+
+    // MARK: Goals (por duración)
+
+    private func goalWorkoutsFor(duration: Duration) -> Int {
+        switch duration {
+        case .d14: return 10
+        case .d21: return 15
+        case .d28: return 20
         }
     }
 }
 
-// MARK: - Reusable cards (same style)
+// MARK: - Cards
 
-private struct MissionTypeCard: View {
-    let type: CreateMissionPopupCard.MissionType
+private struct DurationRowCard: View {
+    let duration: CreateMissionPopupCard.Duration
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? Color.appGreen.opacity(0.18) : Color.white.opacity(0.06))
+                    .frame(width: 44, height: 44)
 
-            HStack {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isSelected ? Color.appGreen.opacity(0.18) : Color.white.opacity(0.06))
-                        .frame(width: 44, height: 44)
-
-                    Image(systemName: type.icon)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(isSelected ? Color.appGreen.opacity(0.95) : .white.opacity(0.70))
-                }
-
-                Spacer()
+                Image(systemName: duration.icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(isSelected ? Color.appGreen.opacity(0.95) : .white.opacity(0.70))
             }
 
-            Text(type.rawValue)
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.92))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(duration.rawValue)
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white.opacity(0.92))
 
-            Text(type.subtitle)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.70))
+                Text(duration.subtitle)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.70))
 
-            Text(type.detail)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
+                Text(duration.detail)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
 
-            Spacer(minLength: 0)
+            Spacer()
+
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(isSelected ? Color.appGreen.opacity(0.95) : .white.opacity(0.25))
         }
         .padding(14)
-        .frame(maxWidth: .infinity)
-        .frame(height: 140)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(isSelected ? Color.appGreen.opacity(0.10) : Color.white.opacity(0.06))
@@ -527,7 +573,6 @@ private struct SelectCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-
             HStack {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -538,7 +583,6 @@ private struct SelectCard: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(isSelected ? Color.appGreen.opacity(0.95) : .white.opacity(0.70))
                 }
-
                 Spacer()
             }
 
@@ -551,7 +595,6 @@ private struct SelectCard: View {
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.60))
                 .lineLimit(multilineSubtitle ? 2 : 1)
-                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
@@ -572,7 +615,6 @@ private struct SelectCard: View {
 
 private struct Chip: View {
     let text: String
-
     var body: some View {
         Text(text)
             .font(.system(size: 12, weight: .heavy, design: .rounded))
@@ -582,10 +624,7 @@ private struct Chip: View {
             .background(
                 Capsule()
                     .fill(Color.appGreen.opacity(0.14))
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.appGreen.opacity(0.28), lineWidth: 1)
-                    )
+                    .overlay(Capsule().stroke(Color.appGreen.opacity(0.28), lineWidth: 1))
             )
     }
 }
@@ -630,22 +669,5 @@ private struct InfoCard: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
         )
-    }
-}
-
-// MARK: - Preview
-
-#Preview {
-    ZStack {
-        AppBackground().ignoresSafeArea()
-        CenterModalOverlay(isPresented: .constant(true)) {
-            CreateMissionPopupCard(
-                onClose: {},
-                onNext: { payload in
-                    print("MISSION:", payload)
-                }
-            )
-            .padding(.horizontal, 18)
-        }
     }
 }

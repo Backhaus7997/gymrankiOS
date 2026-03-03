@@ -10,11 +10,14 @@ import SwiftUI
 @MainActor
 final class ChallengesHomeVM: ObservableObject {
     @Published var isLoading = false
-    @Published var active: [ActiveChallenge] = []
-    @Published var completed: [ActiveChallenge] = []
+    @Published var activeEntries: [Entry] = []
+    @Published var completedEntries: [Entry] = []
     @Published var errorMessage: String?
 
-    private let repo = ChallengeRepository()
+    private let challengeRepo = ChallengeRepository()
+    private let missionRepo = MissionRepository()
+
+    // MARK: Types
 
     struct ActiveChallenge: Identifiable, Hashable {
         let id: String
@@ -25,26 +28,136 @@ final class ChallengesHomeVM: ObservableObject {
             max(0, Int(Date().timeIntervalSince(userChallenge.startedDate) / 86400.0))
         }
 
+        var totalDays: Int { max(template.durationDays, 1) }
+
         var remainingDays: Int {
             max(0, template.durationDays - elapsedDays)
         }
 
         var progress01: Double {
             guard template.durationDays > 0 else { return 0 }
-            // si está completed lo mostramos lleno
             if userChallenge.status == UserChallengeStatus.completed { return 1.0 }
             return min(1.0, Double(elapsedDays) / Double(template.durationDays))
         }
 
         var dayIndex: Int {
-            let total = max(template.durationDays, 1)
-            return min(elapsedDays + 1, total)
+            min(elapsedDays + 1, totalDays)
+        }
+
+        var sortKey: Int64 { userChallenge.createdAt }
+    }
+
+    struct ActiveMission: Identifiable, Hashable {
+        let id: String
+        let userMission: UserMission
+        let template: MissionTemplate
+
+        var elapsedDays: Int {
+            max(0, Int(Date().timeIntervalSince(userMission.startedDate) / 86400.0))
+        }
+
+        var totalDays: Int { max(template.durationDays, 1) }
+
+        var remainingDays: Int {
+            max(0, template.durationDays - elapsedDays)
+        }
+
+        var progress01: Double {
+            guard template.durationDays > 0 else { return 0 }
+            if userMission.status == UserMissionStatus.completed { return 1.0 }
+            return min(1.0, Double(elapsedDays) / Double(template.durationDays))
+        }
+
+        var dayIndex: Int {
+            min(elapsedDays + 1, totalDays)
+        }
+
+        var sortKey: Int64 { userMission.createdAt }
+    }
+
+    enum Entry: Identifiable, Hashable {
+        case challenge(ActiveChallenge)
+        case mission(ActiveMission)
+
+        var id: String {
+            switch self {
+            case .challenge(let c): return "challenge_\(c.id)"
+            case .mission(let m): return "mission_\(m.id)"
+            }
+        }
+
+        var kindLabel: String {
+            switch self {
+            case .challenge: return "DESAFÍO"
+            case .mission: return "MISIÓN"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .challenge(let c): return c.template.title
+            case .mission(let m): return m.template.title
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .challenge(let c): return c.template.subtitle
+            case .mission(let m): return m.template.subtitle
+            }
+        }
+
+        var levelDisplay: String {
+            switch self {
+            case .challenge(let c): return c.template.levelDisplay
+            case .mission(let m): return m.template.levelDisplay
+            }
+        }
+
+        var elapsedDays: Int {
+            switch self {
+            case .challenge(let c): return c.elapsedDays
+            case .mission(let m): return m.elapsedDays
+            }
         }
 
         var totalDays: Int {
-            max(template.durationDays, 1)
+            switch self {
+            case .challenge(let c): return c.totalDays
+            case .mission(let m): return m.totalDays
+            }
+        }
+
+        var dayIndex: Int {
+            switch self {
+            case .challenge(let c): return c.dayIndex
+            case .mission(let m): return m.dayIndex
+            }
+        }
+
+        var remainingDays: Int {
+            switch self {
+            case .challenge(let c): return c.remainingDays
+            case .mission(let m): return m.remainingDays
+            }
+        }
+
+        var progress01: Double {
+            switch self {
+            case .challenge(let c): return c.progress01
+            case .mission(let m): return m.progress01
+            }
+        }
+
+        var sortKey: Int64 {
+            switch self {
+            case .challenge(let c): return c.sortKey
+            case .mission(let m): return m.sortKey
+            }
         }
     }
+
+    // MARK: Load
 
     func load(uid: String) async {
         isLoading = true
@@ -52,30 +165,63 @@ final class ChallengesHomeVM: ObservableObject {
         defer { isLoading = false }
 
         do {
-            // Traemos todo y separamos por status
-            let all = try await repo.fetchUserChallenges(uid: uid, onlyActive: false)
+            async let chAllTask = challengeRepo.fetchUserChallenges(uid: uid, onlyActive: false)
+            async let msAllTask = missionRepo.fetchUserMissions(uid: uid, onlyActive: false)
 
-            let activeUC = all.filter { $0.status == UserChallengeStatus.active }
-            let completedUC = all.filter { $0.status == UserChallengeStatus.completed }
+            let (chAll, msAll) = try await (chAllTask, msAllTask)
 
-            let ids = Array(Set(all.map { $0.templateId }))
-            let templates = try await repo.fetchTemplates(byIds: ids)
+            // Filtrar cancelados
+            let chActive = chAll.filter { $0.status == UserChallengeStatus.active }
+            let chCompleted = chAll.filter { $0.status == UserChallengeStatus.completed }
 
-            let map: [String: ChallengeTemplate] = Dictionary(uniqueKeysWithValues: templates.map { ($0.id, $0) })
+            let msActive = msAll.filter { $0.status == UserMissionStatus.active }
+            let msCompleted = msAll.filter { $0.status == UserMissionStatus.completed }
 
-            func merge(_ list: [UserChallenge]) -> [ActiveChallenge] {
+            // Templates
+            let chIds = Array(Set((chActive + chCompleted).map { $0.templateId }))
+            let msIds = Array(Set((msActive + msCompleted).map { $0.templateId }))
+
+            async let chTemplatesTask = challengeRepo.fetchTemplates(byIds: chIds)
+            async let msTemplatesTask = missionRepo.fetchTemplates(byIds: msIds)
+
+            let (chTemplates, msTemplates) = try await (chTemplatesTask, msTemplatesTask)
+
+            let chMap: [String: ChallengeTemplate] = Dictionary(uniqueKeysWithValues: chTemplates.map { ($0.id, $0) })
+            let msMap: [String: MissionTemplate] = Dictionary(uniqueKeysWithValues: msTemplates.map { ($0.id, $0) })
+
+            func buildChallengeEntries(_ list: [UserChallenge]) -> [Entry] {
                 list.compactMap { uc in
-                    guard let tpl = map[uc.templateId] else { return nil }
-                    return ActiveChallenge(
+                    guard let tpl = chMap[uc.templateId] else { return nil }
+                    let item = ActiveChallenge(
                         id: "\(uc.templateId)_\(uc.uid)",
                         userChallenge: uc,
                         template: tpl
                     )
+                    return .challenge(item)
                 }
             }
 
-            self.active = merge(activeUC)
-            self.completed = merge(completedUC)
+            func buildMissionEntries(_ list: [UserMission]) -> [Entry] {
+                list.compactMap { um in
+                    guard let tpl = msMap[um.templateId] else { return nil }
+                    let item = ActiveMission(
+                        id: "\(um.templateId)_\(um.uid)",
+                        userMission: um,
+                        template: tpl
+                    )
+                    return .mission(item)
+                }
+            }
+
+            var activeMerged = buildChallengeEntries(chActive) + buildMissionEntries(msActive)
+            var completedMerged = buildChallengeEntries(chCompleted) + buildMissionEntries(msCompleted)
+
+            // Orden por createdAt desc
+            activeMerged.sort { $0.sortKey > $1.sortKey }
+            completedMerged.sort { $0.sortKey > $1.sortKey }
+
+            self.activeEntries = activeMerged
+            self.completedEntries = completedMerged
 
         } catch {
             self.errorMessage = error.localizedDescription
@@ -88,12 +234,11 @@ final class ChallengesHomeVM: ObservableObject {
 struct ChallengesView: View {
 
     @EnvironmentObject private var session: SessionManager
-
     @StateObject private var vm = ChallengesHomeVM()
 
     @State private var selected: Segment = .pending
     @State private var route: Route? = nil
-    @State private var selectedActiveChallenge: ChallengesHomeVM.ActiveChallenge? = nil
+    @State private var selectedEntry: ChallengesHomeVM.Entry? = nil
 
     @State private var showEquipmentSheet = false
     @State private var showDestinyBetPopup = false
@@ -132,8 +277,8 @@ struct ChallengesView: View {
         GridItem(.flexible(), spacing: 14)
     ]
 
-    private var listToShow: [ChallengesHomeVM.ActiveChallenge] {
-        selected == .pending ? vm.active : vm.completed
+    private var listToShow: [ChallengesHomeVM.Entry] {
+        selected == .pending ? vm.activeEntries : vm.completedEntries
     }
 
     private var showError: Binding<Bool> {
@@ -161,7 +306,7 @@ struct ChallengesView: View {
 
                     segmented
 
-                    challengesSection
+                    entriesSection
 
                     Spacer(minLength: 110)
                 }
@@ -179,8 +324,7 @@ struct ChallengesView: View {
             }
 
             if vm.isLoading {
-                SwiftUI.ProgressView()
-                    .tint(.white.opacity(0.9))
+                SwiftUI.ProgressView().tint(.white.opacity(0.9))
             }
         }
         .task {
@@ -197,12 +341,23 @@ struct ChallengesView: View {
                 MissionsView()
             }
         }
-        .navigationDestination(item: $selectedActiveChallenge) { a in
-            ActiveChallengeDetailView(active: a) {
-                Task {
-                    let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !cleanUid.isEmpty else { return }
-                    await vm.load(uid: cleanUid)
+        .navigationDestination(item: $selectedEntry) { e in
+            switch e {
+            case .challenge(let c):
+                ActiveChallengeDetailView(active: c) {
+                    Task {
+                        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !cleanUid.isEmpty else { return }
+                        await vm.load(uid: cleanUid)
+                    }
+                }
+            case .mission(let m):
+                ActiveMissionDetailView(active: m) {
+                    Task {
+                        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !cleanUid.isEmpty else { return }
+                        await vm.load(uid: cleanUid)
+                    }
                 }
             }
         }
@@ -310,19 +465,19 @@ struct ChallengesView: View {
         .padding(.top, 2)
     }
 
-    // MARK: - Section
+    // MARK: - Entries Section
 
     @ViewBuilder
-    private var challengesSection: some View {
+    private var entriesSection: some View {
         if listToShow.isEmpty {
             emptyStateCard
         } else {
             VStack(spacing: 14) {
-                ForEach(listToShow) { a in
+                ForEach(listToShow) { entry in
                     Button {
-                        selectedActiveChallenge = a
+                        selectedEntry = entry
                     } label: {
-                        ActiveChallengeCard(active: a, mode: selected)
+                        HomeEntryCard(entry: entry, mode: selected)
                     }
                     .buttonStyle(.plain)
                 }
@@ -332,11 +487,10 @@ struct ChallengesView: View {
     }
 
     private var emptyStateCard: some View {
-        let title: String = (selected == .pending) ? "No hay desafíos pendientes" : "No hay desafíos completados"
-        let subtitle: String = (selected == .pending) ? "Sumate a uno en Descubrir" : "Completá uno para verlo acá"
+        let title: String = (selected == .pending) ? "No hay pendientes" : "No hay completados"
+        let subtitle: String = (selected == .pending) ? "Sumate a un desafío o misión" : "Completá uno para verlo acá"
 
         return VStack(spacing: 14) {
-
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.black.opacity(0.25))
                 .frame(height: 210)
@@ -380,10 +534,10 @@ struct ChallengesView: View {
     }
 }
 
-// MARK: - Active Challenge Card
+// MARK: - Card (Desafío/Misión)
 
-private struct ActiveChallengeCard: View {
-    let active: ChallengesHomeVM.ActiveChallenge
+private struct HomeEntryCard: View {
+    let entry: ChallengesHomeVM.Entry
     let mode: ChallengesView.Segment
 
     var body: some View {
@@ -397,26 +551,47 @@ private struct ActiveChallengeCard: View {
     }
 
     private var headerRow: some View {
-        HStack {
-            Text(active.template.title)
+        HStack(spacing: 10) {
+            Text(entry.title)
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(0.95))
                 .lineLimit(1)
 
             Spacer()
 
-            Text(active.template.levelDisplay)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.90))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.appGreen.opacity(0.18)))
-                .overlay(Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1))
+            kindPill
+
+            levelPill
         }
     }
 
+    private var kindPill: some View {
+        Text(entry.kindLabel)
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .foregroundColor(.white.opacity(0.85))
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    private var levelPill: some View {
+        Text(entry.levelDisplay)
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .foregroundColor(.white.opacity(0.90))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .allowsTightening(true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.appGreen.opacity(0.18)))
+            .overlay(Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1))
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
     private var subtitleText: some View {
-        Text(active.template.subtitle)
+        Text(entry.subtitle)
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .foregroundColor(.white.opacity(0.55))
             .lineLimit(2)
@@ -426,7 +601,6 @@ private struct ActiveChallengeCard: View {
     private var modeSection: some View {
         switch mode {
         case .pending:
-            // ✅ Pendiente muestra la barra (lo que era “Progreso” antes)
             progressBlock
         case .completed:
             completedBlock
@@ -435,10 +609,10 @@ private struct ActiveChallengeCard: View {
 
     private var progressBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SwiftUI.ProgressView(value: active.progress01)
+            SwiftUI.ProgressView(value: entry.progress01)
                 .tint(Color.appGreen.opacity(0.9))
 
-            Text("Día \(active.dayIndex) de \(active.totalDays) • Restan \(active.remainingDays)")
+            Text("Día \(entry.dayIndex) de \(entry.totalDays) • Restan \(entry.remainingDays)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.55))
         }
@@ -474,8 +648,6 @@ private struct QuickCard: Identifiable {
     let icon: String
 }
 
-// MARK: - Quick Card View
-
 private struct QuickCardView: View {
     let item: QuickCard
 
@@ -496,19 +668,18 @@ private struct QuickCardView: View {
                 Text(item.title)
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.92))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .minimumScaleFactor(0.82)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.75)
                     .allowsTightening(true)
-                    .textCase(nil)
+                    .layoutPriority(1)
 
                 Text(item.subtitle)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .allowsTightening(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -526,12 +697,5 @@ private struct QuickCardView: View {
                         .stroke(Color.appGreen.opacity(0.20), lineWidth: 1)
                 )
         )
-    }
-}
-
-#Preview {
-    NavigationStack {
-        ChallengesView()
-            .environmentObject(SessionManager())
     }
 }
