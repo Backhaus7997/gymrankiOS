@@ -35,9 +35,14 @@ final class ChallengesHomeVM: ObservableObject {
         }
 
         var progress01: Double {
-            guard template.durationDays > 0 else { return 0 }
+            if template.durationDays == 0 {
+                return userChallenge.status == UserChallengeStatus.completed ? 1.0 : 0.0
+            }
+
+            guard template.durationDays > 0 else { return 0.0 }
             if userChallenge.status == UserChallengeStatus.completed { return 1.0 }
-            return min(1.0, Double(elapsedDays) / Double(template.durationDays))
+
+            return min(Double(elapsedDays) / Double(template.durationDays), 1.0)
         }
 
         var dayIndex: Int {

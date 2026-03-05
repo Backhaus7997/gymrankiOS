@@ -21,6 +21,7 @@ struct ActiveMissionDetailView: View {
     @State private var errorMessage: String?
 
     private let repo = MissionRepository()
+    private let userRepo = UserRepository.shared
 
     private var uid: String { session.userId.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -30,6 +31,9 @@ struct ActiveMissionDetailView: View {
     private var remainingDays: Int { max(0, totalDays - elapsedDays) }
 
     private var canMarkCompleted: Bool {
+        // ✅ Misiones “instantáneas” (durationDays == 0) se pueden completar siempre
+        if active.template.durationDays == 0 { return true }
+
         guard active.template.durationDays > 0 else { return false }
         return active.elapsedDays >= active.template.durationDays
     }
@@ -81,7 +85,7 @@ struct ActiveMissionDetailView: View {
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Se moverá a Completados.")
+            Text("Se moverá a Completados y sumará puntos.")
         }
     }
 
@@ -147,9 +151,14 @@ struct ActiveMissionDetailView: View {
     private var infoRow: some View {
         HStack(spacing: 10) {
             infoPill(title: "Nivel", value: active.template.levelDisplay)
-            infoPill(title: "Duración", value: "\(active.template.durationDays) días")
+            infoPill(title: "Duración", value: durationText)
             infoPill(title: "Puntos", value: "\(active.template.points)")
         }
+    }
+
+    private var durationText: String {
+        if active.template.durationDays == 0 { return "Instantánea" }
+        return "\(active.template.durationDays) días"
     }
 
     private func infoPill(title: String, value: String) -> some View {
@@ -185,14 +194,20 @@ struct ActiveMissionDetailView: View {
             SwiftUI.ProgressView(value: active.progress01)
                 .tint(Color.appGreen.opacity(0.9))
 
-            Text("Día \(dayIndex) de \(totalDays) • Restan \(remainingDays)")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-
-            if !canMarkCompleted {
-                Text("Podés marcarla como completada cuando termines los \(active.template.durationDays) días.")
+            if active.template.durationDays == 0 {
+                Text("Misión instantánea • Se completa con una acción.")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(.white.opacity(0.55))
+            } else {
+                Text("Día \(dayIndex) de \(totalDays) • Restan \(remainingDays)")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+
+                if !canMarkCompleted {
+                    Text("Podés marcarla como completada cuando termines los \(active.template.durationDays) días.")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                }
             }
         }
         .padding(14)
@@ -314,7 +329,16 @@ struct ActiveMissionDetailView: View {
         defer { isLoading = false }
 
         do {
-            try await repo.setUserMissionStatus(uid: uid, templateId: active.template.id, status: status)
+            if status == UserMissionStatus.completed {
+                _ = try await userRepo.completeMissionAndAwardPoints(
+                    uid: uid,
+                    templateId: active.template.id,
+                    points: active.template.points
+                )
+            } else {
+                try await repo.setUserMissionStatus(uid: uid, templateId: active.template.id, status: status)
+            }
+
             onStatusChanged()
             dismiss()
         } catch {

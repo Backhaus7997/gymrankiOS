@@ -5,6 +5,8 @@ final class ChallengeRepository {
 
     private let db = Firestore.firestore()
 
+    // MARK: - Templates
+
     func fetchActiveTemplates() async throws -> [ChallengeTemplate] {
         let base = db.collection("challenge_templates")
             .whereField("isActive", isEqualTo: true)
@@ -38,25 +40,32 @@ final class ChallengeRepository {
         return ids.compactMap { map[$0] }
     }
 
+    // MARK: - User challenges
+
     func fetchUserChallenges(uid: String, onlyActive: Bool) async throws -> [UserChallenge] {
         var q: Query = db.collection("user_challenges")
             .whereField("uid", isEqualTo: uid)
 
         if onlyActive {
             q = q.whereField("status", isEqualTo: UserChallengeStatus.active)
-        }
 
-        do {
-            let snap = try await q.order(by: "createdAt", descending: true).getDocuments()
-            return snap.documents.map { UserChallenge(document: $0) }
-        } catch {
+            do {
+                let snap = try await q.order(by: "createdAt", descending: true).getDocuments()
+                return snap.documents.map { UserChallenge(document: $0) }
+            } catch {
+                let snap = try await q.getDocuments()
+                var rows = snap.documents.map { UserChallenge(document: $0) }
+                rows.sort { $0.createdAt > $1.createdAt }
+                return rows
+            }
+        } else {
             let snap = try await q.getDocuments()
             var rows = snap.documents.map { UserChallenge(document: $0) }
             rows.sort { $0.createdAt > $1.createdAt }
             return rows
         }
     }
-    
+
     func joinChallenge(uid: String, templateId: String) async throws {
         let docId = "\(uid)_\(templateId)"
         let ref = db.collection("user_challenges").document(docId)
@@ -81,23 +90,6 @@ final class ChallengeRepository {
 
         try await ref.setData(data, merge: true)
     }
-}
-
-private extension Array {
-    func chunked(into size: Int) -> [[Element]] {
-        guard size > 0 else { return [self] }
-        var result: [[Element]] = []
-        var index = 0
-        while index < count {
-            let end = Swift.min(index + size, count)
-            result.append(Array(self[index..<end]))
-            index += size
-        }
-        return result
-    }
-}
-
-extension ChallengeRepository {
 
     func setUserChallengeStatus(uid: String, templateId: String, status: String) async throws {
         let docId = "\(uid)_\(templateId)"
@@ -111,5 +103,21 @@ extension ChallengeRepository {
             "status": status,
             "updatedAt": nowMs
         ], merge: true)
+    }
+}
+
+// MARK: - Helpers
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        var result: [[Element]] = []
+        var index = 0
+        while index < count {
+            let end = Swift.min(index + size, count)
+            result.append(Array(self[index..<end]))
+            index += size
+        }
+        return result
     }
 }

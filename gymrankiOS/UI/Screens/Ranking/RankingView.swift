@@ -2,8 +2,11 @@ import SwiftUI
 
 struct RankingView: View {
 
+    @EnvironmentObject private var session: SessionManager
+
     let bottomInset: CGFloat
     @State private var selected: Segment = .weekly
+    @StateObject private var vm = RankingVM()
 
     enum Segment: String, CaseIterable, Identifiable {
         case weekly = "Semanal"
@@ -12,13 +15,7 @@ struct RankingView: View {
         var id: String { rawValue }
     }
 
-    private var model: RankingModel {
-        switch selected {
-        case .weekly: return .weeklyMock
-        case .monthly: return .monthlyMock
-        case .history: return .historyMock
-        }
-    }
+    private var uid: String { session.userId }
 
     var body: some View {
         ZStack {
@@ -30,14 +27,21 @@ struct RankingView: View {
 
                 Divider()
                     .overlay(Color.white.opacity(0.08))
-
+                
+                if let err = vm.errorMessage, !err.isEmpty {
+                    Text(err)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.red.opacity(0.9))
+                        .padding(.horizontal, 16)
+                }
+                
                 podium
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 10) {
-                        ForEach(model.rest) { row in
+                        ForEach(vm.rest) { row in
                             RankingRowView(row: row)
                         }
                     }
@@ -45,6 +49,11 @@ struct RankingView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 120)
                 }
+            }
+
+            if vm.isLoading {
+                SwiftUI.ProgressView()
+                    .tint(.white)
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -54,33 +63,36 @@ struct RankingView: View {
                 .padding(.bottom, max(8, bottomInset - 8))
                 .background(Color.black.opacity(0.75))
         }
-
+        .task {
+            await vm.load(segment: mapSegment(selected), sessionUserId: uid)
+        }
+        .onChange(of: selected) { _, newValue in
+            Task { await vm.load(segment: mapSegment(newValue), sessionUserId: uid) }
+        }
         .navigationBarBackButtonHidden(true)
+    }
+
+    private func mapSegment(_ seg: Segment) -> RankingVM.Segment {
+        switch seg {
+        case .weekly: return .weekly
+        case .monthly: return .monthly
+        case .history: return .history
+        }
     }
 
     // MARK: - Top Bar
 
     private var topBar: some View {
         HStack(spacing: 12) {
-
-            Button {
-                print("back")
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.white.opacity(0.9))
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
-                    .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
-            VStack(spacing: 4) {
-                Text(model.gymName)
+            
+            Spacer().frame(width: 40)
+                        
+            VStack(alignment: .leading, spacing: 6) {
+                Text(vm.gymName)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.95))
 
-                Text(model.location)
+                Text("Comunidad: \(vm.communityCount)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
                     .padding(.horizontal, 10)
@@ -94,6 +106,7 @@ struct RankingView: View {
                             .stroke(Color.white.opacity(0.10), lineWidth: 1)
                     )
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer()
 
@@ -124,9 +137,7 @@ struct RankingView: View {
     private var segmented: some View {
         HStack(spacing: 0) {
             ForEach(Segment.allCases) { seg in
-                Button {
-                    selected = seg
-                } label: {
+                Button { selected = seg } label: {
                     VStack(spacing: 10) {
                         Text(seg.rawValue)
                             .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -149,28 +160,29 @@ struct RankingView: View {
     // MARK: - Podium
 
     private var podium: some View {
-        HStack(alignment: .top, spacing: 18) {
-
+        let t = vm.top3
+        return HStack(alignment: .top, spacing: 18) {
+            
             PodiumItemView(
                 rank: 2,
-                name: model.top[1].name,
-                points: model.top[1].points
+                name: t.count > 1 ? t[1].name : "—",
+                points: t.count > 1 ? t[1].points : 0
             )
-            .frame(maxWidth: .infinity)
-
+            .frame(maxWidth: CGFloat.infinity)
+            
             PodiumItemView(
                 rank: 1,
-                name: model.top[0].name,
-                points: model.top[0].points
+                name: t.count > 0 ? t[0].name : "—",
+                points: t.count > 0 ? t[0].points : 0
             )
-            .frame(maxWidth: .infinity)
-
+            .frame(maxWidth: CGFloat.infinity)
+            
             PodiumItemView(
                 rank: 3,
-                name: model.top[2].name,
-                points: model.top[2].points
+                name: t.count > 2 ? t[2].name : "—",
+                points: t.count > 2 ? t[2].points : 0
             )
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: CGFloat.infinity)
         }
     }
 
@@ -183,16 +195,14 @@ struct RankingView: View {
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
 
-                Text("#\(model.me.rank) · \(formatPoints(model.me.points)) pts")
+                Text(vm.me.rank > 0 ? "#\(vm.me.rank) · \(formatPoints(vm.me.points)) pts" : "—")
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.92))
             }
 
             Spacer()
 
-            Button {
-                print("ver detalles")
-            } label: {
+            Button { print("ver detalles") } label: {
                 Text("Ver detalles")
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.black)
@@ -218,9 +228,8 @@ struct RankingView: View {
     }
 }
 
-// MARK: - Podium Item
 
-private struct PodiumItemView: View {
+struct PodiumItemView: View {
     let rank: Int
     let name: String
     let points: Int
@@ -245,7 +254,6 @@ private struct PodiumItemView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-
             ZStack {
                 Circle()
                     .fill(Color.white.opacity(0.07))
@@ -278,9 +286,7 @@ private struct PodiumItemView: View {
     }
 }
 
-// MARK: - Row
-
-private struct RankingRowView: View {
+struct RankingRowView: View {
     let row: RankingRow
 
     var body: some View {
@@ -327,96 +333,5 @@ private struct RankingRowView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
         )
-    }
-}
-
-// MARK: - Model
-
-private struct RankingModel {
-    let gymName: String
-    let location: String
-    let top: [RankingTop]
-    let rest: [RankingRow]
-    let me: RankingMe
-
-    static let weeklyMock = RankingModel(
-        gymName: "Iron Temple",
-        location: "Buenos Aires, AR",
-        top: [
-            .init(name: "Mateo Rossi", points: 2450),
-            .init(name: "Sofía Hernández", points: 2100),
-            .init(name: "Lucas González", points: 1850)
-        ],
-        rest: [
-            .init(rank: 4, name: "Valentina Solís", role: "Competidor/a", points: 1640),
-            .init(rank: 5, name: "Joaquín Paz", role: "Competidor/a", points: 1520),
-            .init(rank: 6, name: "Micaela Suárez", role: "Competidor/a", points: 1450),
-            .init(rank: 7, name: "Tomás Herrera", role: "Competidor/a", points: 1320),
-            .init(rank: 8, name: "Agustín Rivas", role: "Competidor/a", points: 1280),
-            .init(rank: 9, name: "Florencia Neri", role: "Competidor/a", points: 1210)
-        ],
-        me: .init(rank: 14, points: 6240)
-    )
-
-    static let monthlyMock = RankingModel(
-        gymName: "Iron Temple",
-        location: "Buenos Aires, AR",
-        top: [
-            .init(name: "Camila Duarte", points: 8120),
-            .init(name: "Bruno Sosa", points: 7650),
-            .init(name: "Nicolás Reyes", points: 7020)
-        ],
-        rest: [
-            .init(rank: 4, name: "Martina Gil", role: "Competidor/a", points: 6810),
-            .init(rank: 5, name: "Franco Paredes", role: "Competidor/a", points: 6590),
-            .init(rank: 6, name: "Lucía Peralta", role: "Competidor/a", points: 6420),
-            .init(rank: 7, name: "Santiago Lemos", role: "Competidor/a", points: 6210),
-            .init(rank: 8, name: "Julieta Vázquez", role: "Competidor/a", points: 6050),
-            .init(rank: 9, name: "Matías Aquino", role: "Competidor/a", points: 5980)
-        ],
-        me: .init(rank: 14, points: 11240)
-    )
-
-    static let historyMock = RankingModel(
-        gymName: "Iron Temple",
-        location: "Buenos Aires, AR",
-        top: [
-            .init(name: "Renata Molina", points: 22100),
-            .init(name: "Iván Correa", points: 20500),
-            .init(name: "Paula Benítez", points: 19250)
-        ],
-        rest: [
-            .init(rank: 4, name: "Diego Funes", role: "Competidor/a", points: 18440),
-            .init(rank: 5, name: "Carla Ríos", role: "Competidor/a", points: 17620),
-            .init(rank: 6, name: "Esteban Vidal", role: "Competidor/a", points: 16990),
-            .init(rank: 7, name: "Ana Cordero", role: "Competidor/a", points: 15800),
-            .init(rank: 8, name: "Pablo Ferrer", role: "Competidor/a", points: 14950),
-            .init(rank: 9, name: "Cecilia Mena", role: "Competidor/a", points: 14110)
-        ],
-        me: .init(rank: 14, points: 35240)
-    )
-}
-
-private struct RankingTop {
-    let name: String
-    let points: Int
-}
-
-private struct RankingRow: Identifiable {
-    let id = UUID()
-    let rank: Int
-    let name: String
-    let role: String
-    let points: Int
-}
-
-private struct RankingMe {
-    let rank: Int
-    let points: Int
-}
-
-#Preview {
-    NavigationStack {
-        RankingView(bottomInset: 36)
     }
 }

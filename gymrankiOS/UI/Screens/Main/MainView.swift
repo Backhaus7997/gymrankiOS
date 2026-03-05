@@ -9,47 +9,47 @@ import SwiftUI
 import FirebaseAuth
 
 struct MainView: View {
-
+    
     @EnvironmentObject private var session: SessionManager
-
+    @StateObject private var checkIn = GymCheckInCoordinator()
+    
     let onGoToWorkout: () -> Void
     let onGoToRanking: () -> Void
-
+    
     private let sideMargin: CGFloat = 12
-
+    
     @State private var showProfileSheet = false
     @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
-
+    
+    // ✅ timer cada 10 minutos
+    private let checkInTimer = Timer.publish(every: 10 * 60, on: .main, in: .common).autoconnect()
+    
     var body: some View {
         ZStack {
             AppBackground().ignoresSafeArea()
-
+            
             GeometryReader { geo in
                 let contentWidth = max(0, geo.size.width - (sideMargin * 2))
-
+                
                 VStack(spacing: 14) {
-
                     TopBar(onTapProfile: { showProfileSheet = true })
                         .frame(width: contentWidth, alignment: .center)
                         .padding(.top, 10)
-
+                    
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 14) {
-
+                            
                             HomeQuickActionsRow(
                                 onLoadWorkout: onGoToWorkout,
                                 onViewRanking: onGoToRanking
                             )
-
-                            // ✅ Ahora pinta músculos según la rutina de HOY
+                            
                             WeeklyMusclesCard(routinePlan: routinePlan)
-
+                            
                             TrainingCalendarCard(maxWidth: contentWidth)
-
-                            // ✅ Mi rutina
+                            
                             MiRutinaCard(routinePlan: $routinePlan)
-
-                            // ✅ Sets por músculo
+                            
                             SetsPerMuscleCard()
                         }
                         .frame(width: contentWidth, alignment: .center)
@@ -59,16 +59,48 @@ struct MainView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+            
+            // ✅ Popup centrado (no sheet)
+            if checkIn.isPresented {
+                Color.black.opacity(0.55)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture {
+                        checkIn.dismissWithoutAnswer(uid: session.userId)
+                    }
+                    .zIndex(9)
+                
+                GymCheckInPromptView(
+                    onYes: { Task { await checkIn.answerYes(uid: session.userId, points: 20) } },
+                    onNo: { checkIn.answerNo(uid: session.userId) },
+                    onClose: { checkIn.dismissWithoutAnswer(uid: session.userId) },
+                    isLoading: checkIn.isSubmitting,
+                    errorMessage: checkIn.errorMessage
+                )
+                .transition(.scale.combined(with: .opacity))
+                .zIndex(10)
+            }
         }
+        .animation(.spring(response: 0.32, dampingFraction: 0.9), value: checkIn.isPresented)
         .fullScreenCover(isPresented: $showProfileSheet) {
             ProfileSheet(onLogout: { RoutineStorage.clear() })
                 .environmentObject(session)
-                .background(Color.clear) // opcional
+                .background(Color.clear)
+        }
+        .task(id: session.userId) {
+            let uid = session.userId
+            guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            await checkIn.maybeShow(uid: uid)
+        }
+        // ✅ cada 10 min re-chequea
+        .onReceive(checkInTimer) { _ in
+            let uid = session.userId
+            guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            Task { await checkIn.maybeShow(uid: uid) }
         }
         .environmentObject(session)
-        }
     }
-
+}
 
 // MARK: - Top bar
 
@@ -225,7 +257,6 @@ fileprivate enum MuscleGroup: String, CaseIterable, Identifiable {
     }
 }
 
-// ✅ esto reemplaza el método que antes estaba dentro de RoutineMuscle (cuando era private en este file)
 fileprivate extension RoutineMuscle {
     func toMuscleGroups() -> [MuscleGroup] {
         switch self {

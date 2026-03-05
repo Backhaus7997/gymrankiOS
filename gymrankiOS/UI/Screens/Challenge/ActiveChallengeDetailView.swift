@@ -21,6 +21,7 @@ struct ActiveChallengeDetailView: View {
     @State private var errorMessage: String?
 
     private let repo = ChallengeRepository()
+    private let userRepo = UserRepository.shared
 
     private var uid: String { session.userId.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -28,8 +29,11 @@ struct ActiveChallengeDetailView: View {
     private var elapsedDays: Int { max(0, active.elapsedDays) }
     private var dayIndex: Int { min(elapsedDays + 1, totalDays) }
     private var remainingDays: Int { max(0, totalDays - elapsedDays) }
-    
+
     private var canMarkCompleted: Bool {
+        // ✅ Si durationDays == 0 -> se puede completar siempre (acciones instantáneas)
+        if active.template.durationDays == 0 { return true }
+
         guard active.template.durationDays > 0 else { return false }
         return active.elapsedDays >= active.template.durationDays
     }
@@ -42,11 +46,8 @@ struct ActiveChallengeDetailView: View {
                 VStack(alignment: .leading, spacing: 14) {
 
                     topBar
-
                     headerCard
-
                     infoRow
-
                     progressCard
 
                     Spacer().frame(height: 110)
@@ -77,7 +78,7 @@ struct ActiveChallengeDetailView: View {
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Se moverá a la pestaña Completados.")
+            Text("Se moverá a la pestaña Completados y sumará puntos.")
         }
     }
 
@@ -144,7 +145,7 @@ struct ActiveChallengeDetailView: View {
         HStack(spacing: 10) {
             infoPill(title: "Nivel", value: active.template.levelDisplay)
             infoPill(title: "Duración", value: active.template.durationText)
-            infoPill(title: "Restan", value: "\(remainingDays) días")
+            infoPill(title: "Puntos", value: "\(active.template.points)")
         }
     }
 
@@ -181,14 +182,20 @@ struct ActiveChallengeDetailView: View {
             SwiftUI.ProgressView(value: active.progress01)
                 .tint(Color.appGreen.opacity(0.9))
 
-            Text("Día \(dayIndex) de \(totalDays) • Restan \(remainingDays)")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-
-            if !canMarkCompleted {
-                Text("Podés marcarlo como completado cuando termines los \(active.template.durationDays) días.")
+            if active.template.durationDays == 0 {
+                Text("Desafío instantáneo • Se completa con una acción.")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(.white.opacity(0.55))
+            } else {
+                Text("Día \(dayIndex) de \(totalDays) • Restan \(remainingDays)")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+
+                if !canMarkCompleted {
+                    Text("Podés marcarlo como completado cuando termines los \(active.template.durationDays) días.")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                }
             }
         }
         .padding(14)
@@ -201,7 +208,7 @@ struct ActiveChallengeDetailView: View {
                 )
         )
     }
-    
+
     private var footerButtons: some View {
         VStack(spacing: 10) {
             Rectangle()
@@ -291,7 +298,16 @@ struct ActiveChallengeDetailView: View {
         defer { isLoading = false }
 
         do {
-            try await repo.setUserChallengeStatus(uid: uid, templateId: active.template.id, status: status)
+            if status == UserChallengeStatus.completed {
+                _ = try await userRepo.completeChallengeAndAwardPoints(
+                    uid: uid,
+                    templateId: active.template.id,
+                    points: active.template.points
+                )
+            } else {
+                try await repo.setUserChallengeStatus(uid: uid, templateId: active.template.id, status: status)
+            }
+
             onStatusChanged()
             dismiss()
         } catch {

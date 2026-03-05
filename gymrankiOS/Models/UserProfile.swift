@@ -14,11 +14,27 @@ enum FeedVisibility: String, Codable {
 
 struct UserProfile: Identifiable, Codable, Equatable {
     var id: String { uid }
+
     var uid: String
     var username: String?
     var fullName: String?
     var avatarUrl: String?
+
+    /// Nivel (si lo usás). Default 1
     var level: Int
+
+    /// Legacy (lo dejamos por compatibilidad)
+    var score: Int
+
+    /// NUEVOS: puntajes por período
+    var scoreWeekly: Int
+    var scoreMonthly: Int
+    var scoreAllTime: Int
+
+    /// Keys para saber si hay que resetear al cambiar semana/mes
+    var scoreWeeklyKey: String?
+    var scoreMonthlyKey: String?
+
     var subtitle: String?
     var feedVisibility: FeedVisibility
     var gymId: String?
@@ -35,6 +51,17 @@ struct UserProfile: Identifiable, Codable, Equatable {
         fullName: String? = nil,
         avatarUrl: String? = nil,
         level: Int = 1,
+
+        // legacy
+        score: Int = 0,
+
+        // nuevos
+        scoreWeekly: Int = 0,
+        scoreMonthly: Int = 0,
+        scoreAllTime: Int = 0,
+        scoreWeeklyKey: String? = nil,
+        scoreMonthlyKey: String? = nil,
+
         subtitle: String? = nil,
         feedVisibility: FeedVisibility = .public,
         gymId: String? = nil,
@@ -50,6 +77,15 @@ struct UserProfile: Identifiable, Codable, Equatable {
         self.fullName = fullName
         self.avatarUrl = avatarUrl
         self.level = level
+
+        self.score = score
+
+        self.scoreWeekly = scoreWeekly
+        self.scoreMonthly = scoreMonthly
+        self.scoreAllTime = scoreAllTime
+        self.scoreWeeklyKey = scoreWeeklyKey
+        self.scoreMonthlyKey = scoreMonthlyKey
+
         self.subtitle = subtitle
         self.feedVisibility = feedVisibility
         self.gymId = gymId
@@ -68,7 +104,7 @@ extension UserProfile {
 
     static func fromFirestore(docId: String, data: [String: Any]) -> UserProfile {
 
-        // feedVisibility (en tu screenshot existe)
+        // feedVisibility
         let visRaw = (data["feedVisibility"] as? String) ?? FeedVisibility.public.rawValue
         let vis = FeedVisibility(rawValue: visRaw) ?? .public
 
@@ -81,6 +117,17 @@ extension UserProfile {
             ?? email?.split(separator: "@").first.map(String.init)
 
         let level = (data["level"] as? Int) ?? 1
+
+        // legacy
+        let legacyScore = (data["score"] as? Int) ?? 0
+
+        // nuevos (fallback al legacy)
+        let scoreWeekly = (data["scoreWeekly"] as? Int) ?? legacyScore
+        let scoreMonthly = (data["scoreMonthly"] as? Int) ?? legacyScore
+        let scoreAllTime = (data["scoreAllTime"] as? Int) ?? legacyScore
+
+        let scoreWeeklyKey = data["scoreWeeklyKey"] as? String
+        let scoreMonthlyKey = data["scoreMonthlyKey"] as? String
 
         let subtitle = (data["subtitle"] as? String) ?? (data["experience"] as? String)
 
@@ -95,6 +142,15 @@ extension UserProfile {
             fullName: fullName,
             avatarUrl: avatarUrl,
             level: level,
+
+            score: legacyScore,
+
+            scoreWeekly: scoreWeekly,
+            scoreMonthly: scoreMonthly,
+            scoreAllTime: scoreAllTime,
+            scoreWeeklyKey: scoreWeeklyKey,
+            scoreMonthlyKey: scoreMonthlyKey,
+
             subtitle: subtitle,
             feedVisibility: vis,
             gymId: data["gymId"] as? String,

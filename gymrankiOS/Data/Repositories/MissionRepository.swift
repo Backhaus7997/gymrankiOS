@@ -56,18 +56,13 @@ final class MissionRepository {
             q = q.whereField("status", isEqualTo: UserMissionStatus.active)
         }
 
-        do {
-            let snap = try await q.order(by: "createdAt", descending: true).getDocuments()
-            return snap.documents.map { UserMission(document: $0) }
-        } catch {
-            // fallback sin índices / building
-            let snap = try await q.getDocuments()
-            var rows = snap.documents.map { UserMission(document: $0) }
-            rows.sort { $0.createdAt > $1.createdAt }
-            return rows
-        }
-    }
+        let snap = try await q.getDocuments()
 
+        var rows = snap.documents.map { UserMission(document: $0) }
+        rows.sort { $0.createdAt > $1.createdAt }
+        return rows
+    }
+    
     func joinMission(uid: String, templateId: String) async throws {
         let docId = "\(uid)_\(templateId)"
         let ref = db.collection("user_missions").document(docId)
