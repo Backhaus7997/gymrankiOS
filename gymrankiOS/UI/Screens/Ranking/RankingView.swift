@@ -19,6 +19,11 @@ struct RankingView: View {
 
     private var uid: String { session.userId }
 
+    private var shouldShowNoGymState: Bool {
+        guard let err = vm.errorMessage?.lowercased() else { return false }
+        return err.contains("gymid")
+    }
+
     var body: some View {
         ZStack {
             AppBackground().ignoresSafeArea()
@@ -30,26 +35,56 @@ struct RankingView: View {
                 Divider()
                     .overlay(Color.white.opacity(0.08))
 
-                if let err = vm.errorMessage, !err.isEmpty {
-                    Text(err)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.red.opacity(0.9))
-                        .padding(.horizontal, 16)
-                }
+                if shouldShowNoGymState {
+                    Spacer()
 
-                podium
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    VStack(spacing: 16) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.06))
+                                .frame(width: 78, height: 78)
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 10) {
-                        ForEach(vm.rest) { row in
-                            RankingRowView(row: row)
+                            Image(systemName: "building.2.crop.circle")
+                                .font(.system(size: 32, weight: .semibold))
+                                .foregroundColor(Color.appGreen.opacity(0.95))
                         }
+
+                        Text("No participás del ranking semanal/mensual")
+                            .font(.system(size: 20, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white.opacity(0.95))
+                            .multilineTextAlignment(.center)
+
+                        Text("Tu gimnasio no está vinculado a la app.\nSolicitá a tu gym vincularse para acceder al ranking.")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.60))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
-                    .padding(.bottom, 120)
+                    .padding(.horizontal, 20)
+
+                    Spacer()
+                } else {
+                    if let err = vm.errorMessage, !err.isEmpty {
+                        Text(err)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.red.opacity(0.9))
+                            .padding(.horizontal, 16)
+                    }
+
+                    podium
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 10) {
+                            ForEach(vm.rest) { row in
+                                RankingRowView(row: row)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 120)
+                    }
                 }
             }
 
@@ -97,11 +132,11 @@ struct RankingView: View {
             Spacer().frame(width: 40)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(vm.gymName)
+                Text(shouldShowNoGymState ? "Ranking" : vm.gymName)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.95))
 
-                Text("Comunidad: \(vm.communityCount)")
+                Text(shouldShowNoGymState ? "Gym no vinculado" : "Comunidad: \(vm.communityCount)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
                     .padding(.horizontal, 10)
@@ -128,7 +163,6 @@ struct RankingView: View {
             }
             .buttonStyle(.plain)
 
-            // ✅ Reemplaza campana por Top Global
             Button {
                 showGlobalTop = true
             } label: {
