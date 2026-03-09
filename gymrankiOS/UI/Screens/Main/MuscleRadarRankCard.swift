@@ -8,66 +8,20 @@
 import SwiftUI
 
 private enum RadarAxis: Int, CaseIterable, Identifiable {
-    case chest, shoulders, back, triceps, legs, biceps, core, cardio, forearms
+    case pecho, hombros, espalda, triceps, piernas, biceps, core, cardio, antebrazos
     var id: Int { rawValue }
 
     var title: String {
         switch self {
-        case .chest: return "Chest"
-        case .shoulders: return "Shoulders"
-        case .back: return "Back"
-        case .triceps: return "Triceps"
-        case .legs: return "Legs"
-        case .biceps: return "Biceps"
+        case .pecho: return "Pecho"
+        case .hombros: return "Hombros"
+        case .espalda: return "Espalda"
+        case .triceps: return "Tríceps"
+        case .piernas: return "Piernas"
+        case .biceps: return "Bíceps"
         case .core: return "Core"
         case .cardio: return "Cardio"
-        case .forearms: return "Forearms"
-        }
-    }
-
-    var assetName: String? {
-        switch self {
-        case .chest:
-            return "mask_front_chest"
-        case .shoulders:
-            return "mask_front_shoulders"
-        case .back:
-            return "mask_back_back"
-        case .legs:
-            return "mask_front_quads"
-        case .biceps:
-            return "mask_front_biceps"
-        case .core:
-            return "mask_front_abs"
-        case .forearms:
-            return "mask_back_forearms"
-        case .triceps:
-            return nil
-        case .cardio:
-            return nil
-        }
-    }
-
-    var fallbackSystemIcon: String {
-        switch self {
-        case .chest:
-            return "figure.strengthtraining.traditional"
-        case .shoulders:
-            return "figure.strengthtraining.functional"
-        case .back:
-            return "figure.strengthtraining.traditional"
-        case .triceps:
-            return "bolt.fill"
-        case .legs:
-            return "figure.walk"
-        case .biceps:
-            return "bolt.fill"
-        case .core:
-            return "circle.grid.cross"
-        case .cardio:
-            return "heart.fill"
-        case .forearms:
-            return "hand.raised.fill"
+        case .antebrazos: return "Antebrazos"
         }
     }
 }
@@ -77,18 +31,6 @@ private struct AxisScore: Identifiable {
     let axis: RadarAxis
     let sets: Int
     let normalized: Double
-    let grade: String
-}
-
-private func grade(for sets: Int) -> String {
-    switch sets {
-    case 0: return "F"
-    case 1...2: return "E"
-    case 3...4: return "D"
-    case 5...7: return "C"
-    case 8...10: return "B"
-    default: return "A"
-    }
 }
 
 private func buildRadarScores(from stats: [MuscleSetStat]) -> [AxisScore] {
@@ -96,26 +38,26 @@ private func buildRadarScores(from stats: [MuscleSetStat]) -> [AxisScore] {
 
     func s(_ key: String) -> Int { dict[key, default: 0] }
 
-    let chest = s("Pecho")
-    let shoulders = s("Hombros")
-    let back = s("Espalda") + s("Trapecios")
+    let pecho = s("Pecho")
+    let hombros = s("Hombros")
+    let espalda = s("Espalda") + s("Trapecios")
     let triceps = s("Tríceps")
     let biceps = s("Bíceps")
-    let forearms = s("Antebrazos")
+    let antebrazos = s("Antebrazos")
     let core = s("Abdomen")
-    let legs = s("Cuádriceps") + s("Femorales") + s("Glúteos") + s("Pantorrillas")
+    let piernas = s("Cuádriceps") + s("Femorales") + s("Glúteos") + s("Pantorrillas")
     let cardio = 0
 
     let raw: [(RadarAxis, Int)] = [
-        (.chest, chest),
-        (.shoulders, shoulders),
-        (.back, back),
+        (.pecho, pecho),
+        (.hombros, hombros),
+        (.espalda, espalda),
         (.triceps, triceps),
-        (.legs, legs),
+        (.piernas, piernas),
         (.biceps, biceps),
         (.core, core),
         (.cardio, cardio),
-        (.forearms, forearms)
+        (.antebrazos, antebrazos)
     ]
 
     let maxV = max(raw.map { $0.1 }.max() ?? 1, 1)
@@ -124,8 +66,7 @@ private func buildRadarScores(from stats: [MuscleSetStat]) -> [AxisScore] {
         AxisScore(
             axis: axis,
             sets: sets,
-            normalized: min(1.0, Double(sets) / Double(maxV)),
-            grade: grade(for: sets)
+            normalized: min(1.0, Double(sets) / Double(maxV))
         )
     }
 }
@@ -200,7 +141,7 @@ private struct RadarChart: View {
         GeometryReader { geo in
             let size = min(geo.size.width, geo.size.height)
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let radius = Double(size) * 0.32
+            let radius = Double(size) * 0.28
 
             ZStack {
                 ForEach(1...rings, id: \.self) { i in
@@ -230,21 +171,15 @@ private struct RadarChart: View {
 
                 ForEach(scores) { s in
                     let i = s.axis.rawValue
-                    let labelR = radius * 1.28
+                    let labelR = radius * 1.38
                     let p = point(center: center, radius: labelR, index: i, total: scores.count)
 
-                    VStack(spacing: 2) {
-                        RadarAxisIcon(axis: s.axis)
-
-                        Text(s.axis.title)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.75))
-
-                        Text(s.grade)
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white.opacity(0.85))
-                    }
-                    .position(p)
+                    Text(s.axis.title)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.80))
+                        .multilineTextAlignment(.center)
+                        .frame(width: 92)
+                        .position(p)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -256,7 +191,7 @@ private struct RadarChart: View {
         var pts: [CGPoint] = []
 
         for i in 0..<scores.count {
-            let r = radius * scores[i].normalized
+            let r = radius * scores[i].normalized * 0.82
             pts.append(point(center: center, radius: r, index: i, total: scores.count))
         }
 
@@ -291,26 +226,5 @@ private struct RadarChart: View {
             x: center.x + CGFloat(cos(angle) * radius),
             y: center.y + CGFloat(sin(angle) * radius)
         )
-    }
-}
-
-private struct RadarAxisIcon: View {
-    let axis: RadarAxis
-
-    var body: some View {
-        Group {
-            if let assetName = axis.assetName {
-                Image(assetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 22, height: 22)
-                    .opacity(0.9)
-            } else {
-                Image(systemName: axis.fallbackSystemIcon)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white.opacity(0.85))
-                    .frame(width: 22, height: 22)
-            }
-        }
     }
 }
