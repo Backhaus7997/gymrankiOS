@@ -10,7 +10,7 @@ import FirebaseFirestore
 final class RankingVM: ObservableObject {
 
     enum Segment {
-        case weekly, monthly, history
+        case weekly, monthly
     }
 
     struct GymContext {
@@ -107,10 +107,9 @@ final class RankingVM: ObservableObject {
         switch segment {
         case .weekly: return "scoreWeekly"
         case .monthly: return "scoreMonthly"
-        case .history: return "scoreAllTime"
         }
     }
-
+    
     private func fetchRankingUsers(
         gymId: String,
         segment: Segment,

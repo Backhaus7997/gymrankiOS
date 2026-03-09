@@ -1,7 +1,10 @@
 import SwiftUI
+import Foundation
 
 struct ContentView: View {
     @EnvironmentObject var session: SessionManager
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -30,6 +33,13 @@ struct ContentView: View {
                     DashboardView()
                 }
             }
+        }
+        .task {
+            await session.refreshPeriodIfNeeded()
+        }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task { await session.refreshPeriodIfNeeded() }
         }
     }
 }

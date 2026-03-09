@@ -4,63 +4,92 @@
 //
 //  Created by Martin Backhaus on 17/02/2026.
 //
-
+//
 import SwiftUI
 import FirebaseAuth
 
 struct MainView: View {
-    
+
     @EnvironmentObject private var session: SessionManager
     @StateObject private var checkIn = GymCheckInCoordinator()
-    
+    @StateObject private var setsVM = SetsPerMuscleViewModel()
+
+    @State private var scrollY: CGFloat = 0
+
     let onGoToWorkout: () -> Void
     let onGoToRanking: () -> Void
-    
+
     private let sideMargin: CGFloat = 12
-    
+    private let topBarHeight: CGFloat = 96   // ajustable si querés
+
     @State private var showProfileSheet = false
     @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
-    
-    // ✅ timer cada 10 minutos
+
     private let checkInTimer = Timer.publish(every: 10 * 60, on: .main, in: .common).autoconnect()
-    
+
     var body: some View {
         ZStack {
             AppBackground().ignoresSafeArea()
-            
+
             GeometryReader { geo in
                 let contentWidth = max(0, geo.size.width - (sideMargin * 2))
-                
-                VStack(spacing: 14) {
-                    TopBar(onTapProfile: { showProfileSheet = true })
-                        .frame(width: contentWidth, alignment: .center)
-                        .padding(.top, 10)
-                    
+
+                ZStack(alignment: .top) {
+
+                    // MARK: - Scroll content
                     ScrollView(showsIndicators: false) {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(
+                                    key: ScrollOffsetKey.self,
+                                    value: proxy.frame(in: .named("mainScroll")).minY
+                                )
+                        }
+                        .frame(height: 0)
+
                         VStack(spacing: 14) {
-                            
                             HomeQuickActionsRow(
                                 onLoadWorkout: onGoToWorkout,
                                 onViewRanking: onGoToRanking
                             )
-                            
+
                             WeeklyMusclesCard(routinePlan: routinePlan)
-                            
+
                             TrainingCalendarCard(maxWidth: contentWidth)
-                            
+
                             MiRutinaCard(routinePlan: $routinePlan)
-                            
-                            SetsPerMuscleCard()
+
+                            SetsPerMuscleCard(vm: setsVM)
+
+                            MuscleRadarRankCard(vm: setsVM)
                         }
                         .frame(width: contentWidth, alignment: .center)
+                        .padding(.top, topBarHeight)   // ✅ arranca justo debajo del top bar
                         .padding(.bottom, 120)
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
+                    .coordinateSpace(name: "mainScroll")
+                    .onPreferenceChange(ScrollOffsetKey.self) { v in
+                        scrollY = v
+                    }
+
+                    // MARK: - Fade arriba
+                    TopBarBackdrop(opacity: topFadeOpacity(scrollY: scrollY))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 138)
+                        .ignoresSafeArea(edges: .top)
+                        .zIndex(4)
+
+                    // MARK: - TopBar fijo
+                    TopBar(onTapProfile: { showProfileSheet = true })
+                        .frame(width: contentWidth, alignment: .center)
+                        .padding(.top, 10)
+                        .zIndex(5)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            
-            // ✅ Popup centrado (no sheet)
+
+            // MARK: - Popup check-in
             if checkIn.isPresented {
                 Color.black.opacity(0.55)
                     .ignoresSafeArea()
@@ -69,7 +98,7 @@ struct MainView: View {
                         checkIn.dismissWithoutAnswer(uid: session.userId)
                     }
                     .zIndex(9)
-                
+
                 GymCheckInPromptView(
                     onYes: { Task { await checkIn.answerYes(uid: session.userId, points: 20) } },
                     onNo: { checkIn.answerNo(uid: session.userId) },
@@ -92,7 +121,6 @@ struct MainView: View {
             guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             await checkIn.maybeShow(uid: uid)
         }
-        // ✅ cada 10 min re-chequea
         .onReceive(checkInTimer) { _ in
             let uid = session.userId
             guard !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -102,6 +130,43 @@ struct MainView: View {
     }
 }
 
+// MARK: - Scroll offset key
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// MARK: - Top fade
+
+private func topFadeOpacity(scrollY: CGFloat) -> Double {
+    // scrollY arranca en 0 y se vuelve negativo al scrollear hacia abajo
+    let progress = min(max((-scrollY) / 70.0, 0.0), 1.0)
+    return Double(progress)
+}
+
+private struct TopBarBackdrop: View {
+    let opacity: Double
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.42 + (opacity * 0.18))
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.28 + (opacity * 0.20)),
+                    Color.black.opacity(0.14 + (opacity * 0.10)),
+                    Color.black.opacity(0.00)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+}
 // MARK: - Top bar
 
 private struct TopBar: View {
@@ -109,7 +174,7 @@ private struct TopBar: View {
     var onTapProfile: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text("Hola 👋")
                     .font(.system(size: 30, weight: .heavy, design: .rounded))
@@ -777,7 +842,7 @@ private struct TrainingCalendarCard: View {
 private struct SetsPerMuscleCard: View {
 
     @EnvironmentObject private var session: SessionManager
-    @StateObject private var vm = SetsPerMuscleViewModel()
+    @ObservedObject var vm: SetsPerMuscleViewModel
     @State private var expanded = false
 
     private var shownItems: [MuscleSetStat] {
@@ -921,12 +986,4 @@ private struct MuscleSetPill: View {
                 )
         )
     }
-}
-
-#Preview {
-    MainView(
-        onGoToWorkout: {},
-        onGoToRanking: {}
-    )
-    .environmentObject(SessionManager())
 }

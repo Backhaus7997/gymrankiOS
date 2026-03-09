@@ -8,10 +8,12 @@ struct RankingView: View {
     @State private var selected: Segment = .weekly
     @StateObject private var vm = RankingVM()
 
+    @State private var showGlobalTop = false
+    @State private var showDetails = false
+
     enum Segment: String, CaseIterable, Identifiable {
         case weekly = "Semanal"
         case monthly = "Mensual"
-        case history = "Historial"
         var id: String { rawValue }
     }
 
@@ -27,14 +29,14 @@ struct RankingView: View {
 
                 Divider()
                     .overlay(Color.white.opacity(0.08))
-                
+
                 if let err = vm.errorMessage, !err.isEmpty {
                     Text(err)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.red.opacity(0.9))
                         .padding(.horizontal, 16)
                 }
-                
+
                 podium
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -69,6 +71,14 @@ struct RankingView: View {
         .onChange(of: selected) { _, newValue in
             Task { await vm.load(segment: mapSegment(newValue), sessionUserId: uid) }
         }
+        .navigationDestination(isPresented: $showGlobalTop) {
+            GlobalRankingView(bottomInset: bottomInset)
+                .environmentObject(session)
+        }
+        .sheet(isPresented: $showDetails) {
+            RankingDetailsSheet()
+                .environmentObject(session)
+        }
         .navigationBarBackButtonHidden(true)
     }
 
@@ -76,7 +86,6 @@ struct RankingView: View {
         switch seg {
         case .weekly: return .weekly
         case .monthly: return .monthly
-        case .history: return .history
         }
     }
 
@@ -84,9 +93,9 @@ struct RankingView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            
+
             Spacer().frame(width: 40)
-                        
+
             VStack(alignment: .leading, spacing: 6) {
                 Text(vm.gymName)
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
@@ -119,12 +128,16 @@ struct RankingView: View {
             }
             .buttonStyle(.plain)
 
-            Button { print("bell") } label: {
-                Image(systemName: "bell")
-                    .foregroundColor(.white.opacity(0.9))
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
-                    .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
+            // ✅ Reemplaza campana por Top Global
+            Button {
+                showGlobalTop = true
+            } label: {
+                Text("Top Global")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black.opacity(0.9))
+                    .padding(.horizontal, 12)
+                    .frame(height: 40)
+                    .background(Capsule().fill(Color.appGreen.opacity(0.95)))
             }
             .buttonStyle(.plain)
         }
@@ -162,21 +175,21 @@ struct RankingView: View {
     private var podium: some View {
         let t = vm.top3
         return HStack(alignment: .top, spacing: 18) {
-            
+
             PodiumItemView(
                 rank: 2,
                 name: t.count > 1 ? t[1].name : "—",
                 points: t.count > 1 ? t[1].points : 0
             )
             .frame(maxWidth: CGFloat.infinity)
-            
+
             PodiumItemView(
                 rank: 1,
                 name: t.count > 0 ? t[0].name : "—",
                 points: t.count > 0 ? t[0].points : 0
             )
             .frame(maxWidth: CGFloat.infinity)
-            
+
             PodiumItemView(
                 rank: 3,
                 name: t.count > 2 ? t[2].name : "—",
@@ -202,7 +215,7 @@ struct RankingView: View {
 
             Spacer()
 
-            Button { print("ver detalles") } label: {
+            Button { showDetails = true } label: {
                 Text("Ver detalles")
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.black)
@@ -225,113 +238,5 @@ struct RankingView: View {
         formatter.groupingSeparator = "."
         formatter.decimalSeparator = ","
         return formatter.string(from: NSNumber(value: points)) ?? "\(points)"
-    }
-}
-
-
-struct PodiumItemView: View {
-    let rank: Int
-    let name: String
-    let points: Int
-
-    private var isWinner: Bool { rank == 1 }
-
-    private var medalColor: Color {
-        switch rank {
-        case 1: return Color.yellow.opacity(0.95)
-        case 2: return Color.white.opacity(0.85)
-        default: return Color.orange.opacity(0.85)
-        }
-    }
-
-    private var ringColor: Color {
-        switch rank {
-        case 1: return Color.appGreen.opacity(0.90)
-        case 2: return Color.white.opacity(0.20)
-        default: return Color.white.opacity(0.18)
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.07))
-                    .frame(width: isWinner ? 96 : 76, height: isWinner ? 96 : 76)
-
-                Circle()
-                    .stroke(ringColor, lineWidth: isWinner ? 2 : 1)
-                    .frame(width: isWinner ? 108 : 76, height: isWinner ? 108 : 76)
-
-                Image(systemName: "medal.fill")
-                    .font(.system(size: isWinner ? 34 : 28, weight: .semibold))
-                    .foregroundColor(medalColor)
-            }
-
-            Text("#\(rank)")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundColor(isWinner ? Color.appGreen.opacity(0.95) : .white.opacity(0.65))
-
-            VStack(spacing: 4) {
-                Text(name)
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.92))
-                    .lineLimit(1)
-
-                Text("\(points) pts")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
-            }
-        }
-    }
-}
-
-struct RankingRowView: View {
-    let row: RankingRow
-
-    var body: some View {
-        HStack(spacing: 12) {
-
-            Text("#\(row.rank)")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.65))
-                .frame(width: 34, alignment: .leading)
-
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.07))
-                    .frame(width: 34, height: 34)
-
-                Image(systemName: "figure.strengthtraining.traditional")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.75))
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(row.name)
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.92))
-
-                Text(row.role)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.50))
-            }
-
-            Spacer()
-
-            Text("\(row.points) pts")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                )
-        )
     }
 }
