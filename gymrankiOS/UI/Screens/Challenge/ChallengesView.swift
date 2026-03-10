@@ -16,6 +16,7 @@ final class ChallengesHomeVM: ObservableObject {
 
     private let challengeRepo = ChallengeRepository()
     private let missionRepo = MissionRepository()
+    private let betRepo = BetRepository()
 
     // MARK: Types
 
@@ -24,31 +25,18 @@ final class ChallengesHomeVM: ObservableObject {
         let userChallenge: UserChallenge
         let template: ChallengeTemplate
 
-        var elapsedDays: Int {
-            max(0, Int(Date().timeIntervalSince(userChallenge.startedDate) / 86400.0))
-        }
-
+        var elapsedDays: Int { max(0, Int(Date().timeIntervalSince(userChallenge.startedDate) / 86400.0)) }
         var totalDays: Int { max(template.durationDays, 1) }
-
-        var remainingDays: Int {
-            max(0, template.durationDays - elapsedDays)
-        }
+        var remainingDays: Int { max(0, template.durationDays - elapsedDays) }
 
         var progress01: Double {
-            if template.durationDays == 0 {
-                return userChallenge.status == UserChallengeStatus.completed ? 1.0 : 0.0
-            }
-
+            if template.durationDays == 0 { return userChallenge.status == UserChallengeStatus.completed ? 1.0 : 0.0 }
             guard template.durationDays > 0 else { return 0.0 }
             if userChallenge.status == UserChallengeStatus.completed { return 1.0 }
-
             return min(Double(elapsedDays) / Double(template.durationDays), 1.0)
         }
 
-        var dayIndex: Int {
-            min(elapsedDays + 1, totalDays)
-        }
-
+        var dayIndex: Int { min(elapsedDays + 1, totalDays) }
         var sortKey: Int64 { userChallenge.createdAt }
     }
 
@@ -57,15 +45,9 @@ final class ChallengesHomeVM: ObservableObject {
         let userMission: UserMission
         let template: MissionTemplate
 
-        var elapsedDays: Int {
-            max(0, Int(Date().timeIntervalSince(userMission.startedDate) / 86400.0))
-        }
-
+        var elapsedDays: Int { max(0, Int(Date().timeIntervalSince(userMission.startedDate) / 86400.0)) }
         var totalDays: Int { max(template.durationDays, 1) }
-
-        var remainingDays: Int {
-            max(0, template.durationDays - elapsedDays)
-        }
+        var remainingDays: Int { max(0, template.durationDays - elapsedDays) }
 
         var progress01: Double {
             guard template.durationDays > 0 else { return 0 }
@@ -73,21 +55,50 @@ final class ChallengesHomeVM: ObservableObject {
             return min(1.0, Double(elapsedDays) / Double(template.durationDays))
         }
 
-        var dayIndex: Int {
-            min(elapsedDays + 1, totalDays)
+        var dayIndex: Int { min(elapsedDays + 1, totalDays) }
+        var sortKey: Int64 { userMission.createdAt }
+    }
+
+    struct ActiveBet: Identifiable, Hashable {
+        let id: String
+        let userBet: UserBet
+        let template: BetTemplate
+
+        var completedTasks: Int {
+            zip(template.tasks, userBet.progress).filter { (task, value) in value >= task.target }.count
         }
 
-        var sortKey: Int64 { userMission.createdAt }
+        var totalTasks: Int { template.tasks.count }
+
+        var progress01: Double {
+            guard totalTasks > 0 else { return 0 }
+            return min(1.0, Double(completedTasks) / Double(totalTasks))
+        }
+
+        var progressLine: String {
+            "Tareas \(completedTasks)/\(max(totalTasks, 0))"
+        }
+
+        var subtitle: String {
+            template.durationType == "daily"
+                ? "Completá todas las tareas en 24 horas"
+                : "Completá todas las tareas en 3 horas"
+        }
+
+        var levelDisplay: String { template.difficultyDisplay }
+        var sortKey: Int64 { userBet.createdAt }
     }
 
     enum Entry: Identifiable, Hashable {
         case challenge(ActiveChallenge)
         case mission(ActiveMission)
+        case bet(ActiveBet)
 
         var id: String {
             switch self {
             case .challenge(let c): return "challenge_\(c.id)"
             case .mission(let m): return "mission_\(m.id)"
+            case .bet(let b): return "bet_\(b.id)"
             }
         }
 
@@ -95,6 +106,7 @@ final class ChallengesHomeVM: ObservableObject {
             switch self {
             case .challenge: return "DESAFÍO"
             case .mission: return "MISIÓN"
+            case .bet: return "APUESTA"
             }
         }
 
@@ -102,6 +114,7 @@ final class ChallengesHomeVM: ObservableObject {
             switch self {
             case .challenge(let c): return c.template.title
             case .mission(let m): return m.template.title
+            case .bet(let b): return b.template.title
             }
         }
 
@@ -109,6 +122,7 @@ final class ChallengesHomeVM: ObservableObject {
             switch self {
             case .challenge(let c): return c.template.subtitle
             case .mission(let m): return m.template.subtitle
+            case .bet(let b): return b.subtitle
             }
         }
 
@@ -116,34 +130,7 @@ final class ChallengesHomeVM: ObservableObject {
             switch self {
             case .challenge(let c): return c.template.levelDisplay
             case .mission(let m): return m.template.levelDisplay
-            }
-        }
-
-        var elapsedDays: Int {
-            switch self {
-            case .challenge(let c): return c.elapsedDays
-            case .mission(let m): return m.elapsedDays
-            }
-        }
-
-        var totalDays: Int {
-            switch self {
-            case .challenge(let c): return c.totalDays
-            case .mission(let m): return m.totalDays
-            }
-        }
-
-        var dayIndex: Int {
-            switch self {
-            case .challenge(let c): return c.dayIndex
-            case .mission(let m): return m.dayIndex
-            }
-        }
-
-        var remainingDays: Int {
-            switch self {
-            case .challenge(let c): return c.remainingDays
-            case .mission(let m): return m.remainingDays
+            case .bet(let b): return b.levelDisplay
             }
         }
 
@@ -151,6 +138,18 @@ final class ChallengesHomeVM: ObservableObject {
             switch self {
             case .challenge(let c): return c.progress01
             case .mission(let m): return m.progress01
+            case .bet(let b): return b.progress01
+            }
+        }
+
+        var progressLine: String {
+            switch self {
+            case .challenge(let c):
+                return "Día \(c.dayIndex) de \(c.totalDays) • Restan \(c.remainingDays)"
+            case .mission(let m):
+                return "Día \(m.dayIndex) de \(m.totalDays) • Restan \(m.remainingDays)"
+            case .bet(let b):
+                return b.progressLine
             }
         }
 
@@ -158,6 +157,7 @@ final class ChallengesHomeVM: ObservableObject {
             switch self {
             case .challenge(let c): return c.sortKey
             case .mission(let m): return m.sortKey
+            case .bet(let b): return b.sortKey
             }
         }
     }
@@ -172,56 +172,57 @@ final class ChallengesHomeVM: ObservableObject {
         do {
             async let chAllTask = challengeRepo.fetchUserChallenges(uid: uid, onlyActive: false)
             async let msAllTask = missionRepo.fetchUserMissions(uid: uid, onlyActive: false)
+            async let btAllTask = betRepo.fetchUserBets(uid: uid, onlyActive: false)
 
-            let (chAll, msAll) = try await (chAllTask, msAllTask)
+            let (chAll, msAll, btAll) = try await (chAllTask, msAllTask, btAllTask)
 
-            // Filtrar cancelados
             let chActive = chAll.filter { $0.status == UserChallengeStatus.active }
             let chCompleted = chAll.filter { $0.status == UserChallengeStatus.completed }
 
             let msActive = msAll.filter { $0.status == UserMissionStatus.active }
             let msCompleted = msAll.filter { $0.status == UserMissionStatus.completed }
 
-            // Templates
+            let btActive = btAll.filter { $0.status == UserBetStatus.active }
+            let btCompleted = btAll.filter { $0.status == UserBetStatus.completed }
+
             let chIds = Array(Set((chActive + chCompleted).map { $0.templateId }))
             let msIds = Array(Set((msActive + msCompleted).map { $0.templateId }))
+            let btIds = Array(Set((btActive + btCompleted).map { $0.templateId }))
 
             async let chTemplatesTask = challengeRepo.fetchTemplates(byIds: chIds)
             async let msTemplatesTask = missionRepo.fetchTemplates(byIds: msIds)
+            async let btTemplatesTask = betRepo.fetchTemplates(byIds: btIds)
 
-            let (chTemplates, msTemplates) = try await (chTemplatesTask, msTemplatesTask)
+            let (chTemplates, msTemplates, btTemplates) = try await (chTemplatesTask, msTemplatesTask, btTemplatesTask)
 
             let chMap: [String: ChallengeTemplate] = Dictionary(uniqueKeysWithValues: chTemplates.map { ($0.id, $0) })
             let msMap: [String: MissionTemplate] = Dictionary(uniqueKeysWithValues: msTemplates.map { ($0.id, $0) })
+            let btMap: [String: BetTemplate] = Dictionary(uniqueKeysWithValues: btTemplates.map { ($0.id, $0) })
 
             func buildChallengeEntries(_ list: [UserChallenge]) -> [Entry] {
                 list.compactMap { uc in
                     guard let tpl = chMap[uc.templateId] else { return nil }
-                    let item = ActiveChallenge(
-                        id: "\(uc.templateId)_\(uc.uid)",
-                        userChallenge: uc,
-                        template: tpl
-                    )
-                    return .challenge(item)
+                    return .challenge(.init(id: "\(uc.templateId)_\(uc.uid)", userChallenge: uc, template: tpl))
                 }
             }
 
             func buildMissionEntries(_ list: [UserMission]) -> [Entry] {
                 list.compactMap { um in
                     guard let tpl = msMap[um.templateId] else { return nil }
-                    let item = ActiveMission(
-                        id: "\(um.templateId)_\(um.uid)",
-                        userMission: um,
-                        template: tpl
-                    )
-                    return .mission(item)
+                    return .mission(.init(id: "\(um.templateId)_\(um.uid)", userMission: um, template: tpl))
                 }
             }
 
-            var activeMerged = buildChallengeEntries(chActive) + buildMissionEntries(msActive)
-            var completedMerged = buildChallengeEntries(chCompleted) + buildMissionEntries(msCompleted)
+            func buildBetEntries(_ list: [UserBet]) -> [Entry] {
+                list.compactMap { ub in
+                    guard let tpl = btMap[ub.templateId] else { return nil }
+                    return .bet(.init(id: "\(ub.templateId)_\(ub.uid)", userBet: ub, template: tpl))
+                }
+            }
 
-            // Orden por createdAt desc
+            var activeMerged = buildChallengeEntries(chActive) + buildMissionEntries(msActive) + buildBetEntries(btActive)
+            var completedMerged = buildChallengeEntries(chCompleted) + buildMissionEntries(msCompleted) + buildBetEntries(btCompleted)
+
             activeMerged.sort { $0.sortKey > $1.sortKey }
             completedMerged.sort { $0.sortKey > $1.sortKey }
 
@@ -301,7 +302,6 @@ struct ChallengesView: View {
                 VStack(alignment: .leading, spacing: 16) {
 
                     topBar
-
                     quickActionsGrid
 
                     Text("Vista:")
@@ -310,7 +310,6 @@ struct ChallengesView: View {
                         .padding(.top, 4)
 
                     segmented
-
                     entriesSection
 
                     Spacer(minLength: 110)
@@ -332,38 +331,25 @@ struct ChallengesView: View {
                 SwiftUI.ProgressView().tint(.white.opacity(0.9))
             }
         }
-        .task {
-            let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleanUid.isEmpty else { return }
-            await vm.load(uid: cleanUid)
+        .task { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .betCreated)) { _ in
+            Task { await reload() }
         }
         .navigationBarBackButtonHidden(true)
         .navigationDestination(item: $route) { r in
             switch r {
-            case .discover:
-                ChallengesDiscoverView()
-            case .missions:
-                MissionsView()
+            case .discover: ChallengesDiscoverView()
+            case .missions: MissionsView()
             }
         }
         .navigationDestination(item: $selectedEntry) { e in
             switch e {
             case .challenge(let c):
-                ActiveChallengeDetailView(active: c) {
-                    Task {
-                        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !cleanUid.isEmpty else { return }
-                        await vm.load(uid: cleanUid)
-                    }
-                }
+                ActiveChallengeDetailView(active: c) { Task { await reload() } }
             case .mission(let m):
-                ActiveMissionDetailView(active: m) {
-                    Task {
-                        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !cleanUid.isEmpty else { return }
-                        await vm.load(uid: cleanUid)
-                    }
-                }
+                ActiveMissionDetailView(active: m) { Task { await reload() } }
+            case .bet(let b):
+                ActiveBetDetailView(active: b) { Task { await reload() } }
             }
         }
         .sheet(isPresented: $showEquipmentSheet) {
@@ -381,6 +367,13 @@ struct ChallengesView: View {
         })
     }
 
+    @MainActor
+    private func reload() async {
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanUid.isEmpty else { return }
+        await vm.load(uid: cleanUid)
+    }
+
     // MARK: - Top bar
 
     private var topBar: some View {
@@ -391,9 +384,7 @@ struct ChallengesView: View {
 
             Spacer()
 
-            Button {
-                print("menu")
-            } label: {
+            Button { print("menu") } label: {
                 Image(systemName: "line.3.horizontal")
                     .foregroundColor(.white.opacity(0.9))
                     .frame(width: 44, height: 44)
@@ -410,9 +401,7 @@ struct ChallengesView: View {
     private var quickActionsGrid: some View {
         LazyVGrid(columns: columns, spacing: 14) {
             ForEach(items) { item in
-                Button {
-                    handleQuickTap(item.title)
-                } label: {
+                Button { handleQuickTap(item.title) } label: {
                     QuickCardView(item: item)
                 }
                 .buttonStyle(.plain)
@@ -422,16 +411,11 @@ struct ChallengesView: View {
 
     private func handleQuickTap(_ title: String) {
         switch title {
-        case "Descubrir":
-            route = .discover
-        case "Misiones":
-            route = .missions
-        case "Equipamiento":
-            showEquipmentSheet = true
-        case "Apuestas":
-            showDestinyBetPopup = true
-        default:
-            print("tap \(title)")
+        case "Descubrir": route = .discover
+        case "Misiones": route = .missions
+        case "Equipamiento": showEquipmentSheet = true
+        case "Apuestas": showDestinyBetPopup = true
+        default: break
         }
     }
 
@@ -440,13 +424,9 @@ struct ChallengesView: View {
     private var segmented: some View {
         HStack(spacing: 10) {
             ForEach(Segment.allCases) { seg in
-                Button {
-                    selected = seg
-                } label: {
+                Button { selected = seg } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: seg.icon)
-                            .font(.system(size: 13, weight: .bold))
-
+                        Image(systemName: seg.icon).font(.system(size: 13, weight: .bold))
                         Text(seg.rawValue)
                             .font(.system(size: 13, weight: .heavy, design: .rounded))
                             .lineLimit(1)
@@ -455,14 +435,8 @@ struct ChallengesView: View {
                     .padding(.vertical, 10)
                     .padding(.horizontal, 12)
                     .frame(maxWidth: .infinity)
-                    .background(
-                        Capsule()
-                            .fill(selected == seg ? Color.appGreen.opacity(0.12) : Color.white.opacity(0.06))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(selected == seg ? Color.appGreen.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1)
-                    )
+                    .background(Capsule().fill(selected == seg ? Color.appGreen.opacity(0.12) : Color.white.opacity(0.06)))
+                    .overlay(Capsule().stroke(selected == seg ? Color.appGreen.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
             }
@@ -479,9 +453,7 @@ struct ChallengesView: View {
         } else {
             VStack(spacing: 14) {
                 ForEach(listToShow) { entry in
-                    Button {
-                        selectedEntry = entry
-                    } label: {
+                    Button { selectedEntry = entry } label: {
                         HomeEntryCard(entry: entry, mode: selected)
                     }
                     .buttonStyle(.plain)
@@ -492,8 +464,8 @@ struct ChallengesView: View {
     }
 
     private var emptyStateCard: some View {
-        let title: String = (selected == .pending) ? "No hay pendientes" : "No hay completados"
-        let subtitle: String = (selected == .pending) ? "Sumate a un desafío o misión" : "Completá uno para verlo acá"
+        let title = (selected == .pending) ? "No hay pendientes" : "No hay completados"
+        let subtitle = (selected == .pending) ? "Sumate a un desafío, misión o apuesta" : "Completá uno para verlo acá"
 
         return VStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -504,10 +476,7 @@ struct ChallengesView: View {
                         .font(.system(size: 54, weight: .bold))
                         .foregroundColor(.white.opacity(0.30))
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                )
+                .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.10), lineWidth: 1))
                 .padding(.top, 6)
 
             VStack(spacing: 6) {
@@ -530,16 +499,13 @@ struct ChallengesView: View {
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.appGreen.opacity(0.12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.appGreen.opacity(0.22), lineWidth: 1)
-                )
+                .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.appGreen.opacity(0.22), lineWidth: 1))
         )
         .padding(.top, 6)
     }
 }
 
-// MARK: - Card (Desafío/Misión)
+// MARK: - Card
 
 private struct HomeEntryCard: View {
     let entry: ChallengesHomeVM.Entry
@@ -565,7 +531,6 @@ private struct HomeEntryCard: View {
             Spacer()
 
             kindPill
-
             levelPill
         }
     }
@@ -605,10 +570,8 @@ private struct HomeEntryCard: View {
     @ViewBuilder
     private var modeSection: some View {
         switch mode {
-        case .pending:
-            progressBlock
-        case .completed:
-            completedBlock
+        case .pending: progressBlock
+        case .completed: completedBlock
         }
     }
 
@@ -617,7 +580,7 @@ private struct HomeEntryCard: View {
             SwiftUI.ProgressView(value: entry.progress01)
                 .tint(Color.appGreen.opacity(0.9))
 
-            Text("Día \(entry.dayIndex) de \(entry.totalDays) • Restan \(entry.remainingDays)")
+            Text(entry.progressLine)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.55))
         }
@@ -637,10 +600,7 @@ private struct HomeEntryCard: View {
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(Color.white.opacity(0.06))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.appGreen.opacity(0.22), lineWidth: 1)
-            )
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.appGreen.opacity(0.22), lineWidth: 1))
     }
 }
 
@@ -658,7 +618,6 @@ private struct QuickCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.appGreen.opacity(0.18))
@@ -674,17 +633,13 @@ private struct QuickCardView: View {
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.92))
                     .lineLimit(1)
-                    .truncationMode(.tail)
                     .minimumScaleFactor(0.75)
                     .allowsTightening(true)
-                    .layoutPriority(1)
 
                 Text(item.subtitle)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-                    .allowsTightening(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -697,10 +652,7 @@ private struct QuickCardView: View {
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.appGreen.opacity(0.20), lineWidth: 1)
-                )
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.appGreen.opacity(0.20), lineWidth: 1))
         )
     }
 }

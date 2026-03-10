@@ -449,3 +449,39 @@ extension UserRepository {
         }
     }
 }
+
+// MARK: - Complete bet + award points
+
+extension UserRepository {
+
+    func completeBetAndAwardPoints(
+        uid: String,
+        templateId: String,
+        points: Int
+    ) async throws -> Bool {
+
+        let cleanUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTpl = templateId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanUid.isEmpty, !cleanTpl.isEmpty else { return false }
+
+        let userRef = db.collection("users").document(cleanUid)
+        let itemRef = db.collection("user_bets").document("\(cleanUid)_\(cleanTpl)")
+
+        return try await runAwardTransaction(
+            userRef: userRef,
+            itemRef: itemRef,
+            itemStatusField: "status",
+            itemCompletedValue: UserBetStatus.completed,
+            points: points,
+            extraItemWrites: { tx, nowMs in
+                tx.setData([
+                    "uid": cleanUid,
+                    "templateId": cleanTpl,
+                    "status": UserBetStatus.completed,
+                    "completedAt": FieldValue.serverTimestamp(),
+                    "updatedAt": nowMs
+                ], forDocument: itemRef, merge: true)
+            }
+        )
+    }
+}

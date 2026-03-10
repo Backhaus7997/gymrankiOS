@@ -4,36 +4,27 @@ import SwiftUI
 
 struct DestinyBetFlowPopup: View {
 
-    // Orden de popups
-    enum Step: Int {
-        case intro
-        case wheel
-        case dice
-        case duration
-        case accepted
-    }
+    enum Step: Int { case intro, wheel, dice, duration, accepted }
 
-    // Dificultad de la rueda
+    // Dificultad (SIN INSANO) - UI ES, Firestore EN
     enum Difficulty: String, CaseIterable, Identifiable {
         case easy = "FÁCIL"
         case medium = "MEDIO"
         case hard = "DIFÍCIL"
-        case insane = "INSANO"
 
         var id: String { rawValue }
         var pillText: String { rawValue }
 
-        /// Orden visual de los cuadrantes (igual a tu wheel actual):
-        /// 0: arriba-derecha (FÁCIL)
-        /// 1: derecha (MEDIO)  -> lo usamos como “siguiente” en sentido horario en el snap
-        /// 2: abajo (DIFÍCIL)
-        /// 3: izquierda (INSANO)
-        ///
-        /// Importante: NO es “arriba puntero”, es el orden de tus labels actuales.
-        static let wheelOrder: [Difficulty] = [.easy, .medium, .hard, .insane]
+        var firestoreKey: String {
+            switch self {
+            case .easy: return "EASY"
+            case .medium: return "MEDIUM"
+            case .hard: return "HARD"
+            }
+        }
     }
 
-    // Foco de los dados
+    // Foco - UI ES, Firestore EN
     enum Focus: String, CaseIterable, Identifiable {
         case upper = "Superior"
         case lower = "Inferior"
@@ -44,15 +35,24 @@ struct DestinyBetFlowPopup: View {
 
         var chip: String {
             switch self {
-            case .upper: return "💪  Upper"
-            case .lower: return "🦵  Lower"
-            case .abs: return "🔥  Abs"
+            case .upper: return "💪  Superior"
+            case .lower: return "🦵  Inferior"
+            case .abs: return "🔥  Abdomen"
             case .cardio: return "❤️  Cardio"
+            }
+        }
+
+        var firestoreKey: String {
+            switch self {
+            case .upper: return "upper"
+            case .lower: return "lower"
+            case .abs: return "abs"
+            case .cardio: return "cardio"
             }
         }
     }
 
-    // Duración
+    // Duración - UI ES, Firestore EN
     enum DurationType: String, CaseIterable, Identifiable {
         case daily = "DIARIO"
         case short = "CORTA"
@@ -72,21 +72,33 @@ struct DestinyBetFlowPopup: View {
             case .short: return "bolt.fill"
             }
         }
+
+        var firestoreKey: String {
+            switch self {
+            case .daily: return "daily"
+            case .short: return "short"
+            }
+        }
+
+        var pill: String { self == .daily ? "24h" : "3h" }
     }
 
+    @EnvironmentObject private var session: SessionManager
     let onClose: () -> Void
 
     @State private var step: Step = .intro
-
-    // resultados del “destino”
     @State private var difficulty: Difficulty = .medium
     @State private var focus: Focus = .upper
     @State private var duration: DurationType = .daily
 
+    @State private var isStarting = false
+    @State private var errorMessage: String? = nil
+
+    private let repo = BetRepository()
+
     var body: some View {
         Group {
             switch step {
-
             case .intro:
                 DestinyIntroCard(
                     onClose: onClose,
@@ -94,7 +106,7 @@ struct DestinyBetFlowPopup: View {
                 )
 
             case .wheel:
-                WheelCard(
+                WheelCard3(
                     current: $difficulty,
                     onClose: onClose,
                     onBack: { step = .intro },
@@ -115,6 +127,7 @@ struct DestinyBetFlowPopup: View {
                     onClose: onClose,
                     onBack: { step = .dice },
                     onSelect: { duration = $0 },
+                    onNext: { step = .accepted },
                     onRandom: {
                         duration = DurationType.allCases.randomElement() ?? .daily
                         step = .accepted
@@ -126,38 +139,70 @@ struct DestinyBetFlowPopup: View {
                     difficulty: difficulty,
                     focus: focus,
                     duration: duration,
+                    isStarting: isStarting,
+                    errorMessage: errorMessage,
                     onClose: onClose,
-                    onStartMission: { onClose() }
+                    onBack: { step = .duration },
+                    onStartBet: { Task { await startBet() } }
                 )
             }
         }
         .padding(.horizontal, 18)
     }
+
+    @MainActor
+    private func startBet() async {
+        if isStarting { return }
+
+        let uid = session.userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else {
+            errorMessage = "No hay usuario logueado."
+            return
+        }
+
+        isStarting = true
+        errorMessage = nil
+        defer { isStarting = false }
+
+        do {
+            let tpl = try await repo.fetchRandomTemplate(
+                difficulty: difficulty.firestoreKey,
+                focus: focus.firestoreKey,
+                durationType: duration.firestoreKey
+            )
+
+            try await repo.createUserBet(uid: uid, template: tpl)
+
+            NotificationCenter.default.post(name: .betCreated, object: nil)
+            onClose()
+        } catch {
+            // Dejá info útil para debug
+            errorMessage = "No hay templates para \(difficulty.firestoreKey)/\(focus.firestoreKey)/\(duration.firestoreKey)."
+        }
+    }
 }
 
-// MARK: - Shared UI helpers (con nombres únicos para NO chocar)
+// MARK: - Shared UI helpers
 
 private struct BetPopupContainer<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
 
     var body: some View {
-        VStack(spacing: 14) {
-            content
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.88))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.appGreen.opacity(0.18), lineWidth: 1)
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        VStack(spacing: 14) { content }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.black.opacity(0.88))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.appGreen.opacity(0.18), lineWidth: 1)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
@@ -286,16 +331,12 @@ private struct BetPill: View {
             .foregroundColor(isActive ? Color.appGreen.opacity(0.95) : .white.opacity(0.70))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(
-                Capsule().fill(isActive ? Color.appGreen.opacity(0.12) : Color.white.opacity(0.06))
-            )
-            .overlay(
-                Capsule().stroke(isActive ? Color.appGreen.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1)
-            )
+            .background(Capsule().fill(isActive ? Color.appGreen.opacity(0.12) : Color.white.opacity(0.06)))
+            .overlay(Capsule().stroke(isActive ? Color.appGreen.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1))
     }
 }
 
-// MARK: - Step 1: Intro
+// MARK: - Step 1
 
 private struct DestinyIntroCard: View {
     let onClose: () -> Void
@@ -306,14 +347,14 @@ private struct DestinyIntroCard: View {
             BetPopupHeader(
                 icon: "die.face.5.fill",
                 title: "Apuesta del destino",
-                subtitle: "Dejá que el destino elija tu desafío",
+                subtitle: "Dejá que el destino elija tu apuesta",
                 onClose: onClose
             )
 
             VStack(spacing: 10) {
                 BetSectionCard(title: "Girá la rueda", subtitle: "Define la dificultad")
-                BetSectionCard(title: "Tirás los dados", subtitle: "Define el foco del cuerpo")
-                BetSectionCard(title: "Elegís duración", subtitle: "Diario o misión corta")
+                BetSectionCard(title: "Tirá los dados", subtitle: "Define el enfoque")
+                BetSectionCard(title: "Elegí duración", subtitle: "Diaria o corta")
             }
 
             BetPrimaryButton(title: "EMPEZAR", action: onStart)
@@ -321,11 +362,10 @@ private struct DestinyIntroCard: View {
     }
 }
 
-// MARK: - Step 2: Wheel (FUNCIONAL + SNAP para que los títulos queden como la referencia)
+// MARK: - Step 2: Wheel (3 slices)
 
-private struct WheelCard: View {
+private struct WheelCard3: View {
     @Binding var current: DestinyBetFlowPopup.Difficulty
-
     let onClose: () -> Void
     let onBack: () -> Void
     let onNext: () -> Void
@@ -338,75 +378,52 @@ private struct WheelCard: View {
             BetPopupHeader(
                 icon: "die.face.5.fill",
                 title: "Girá la rueda",
-                subtitle: "Definí el nivel del desafío",
+                subtitle: "Definí la dificultad",
                 onClose: onClose
             )
 
-            DifficultyWheel(
-                size: 210,
-                rotation: rotation
-            )
-            .frame(height: 280)
+            DifficultyWheel3(size: 210, rotation: rotation)
+                .frame(height: 280)
 
             BetPill(text: "Actual: \(current.pillText)", isActive: true)
 
-            BetPrimaryButton(title: "¡GIRAR!", isDisabled: isSpinning) {
-                spinSnap()
-            }
-
+            BetPrimaryButton(title: "¡GIRAR!", isDisabled: isSpinning) { spinSnap3() }
             BetSecondaryButton(title: "Volver", action: onBack)
 
             HStack {
-                Text("Tip: girá para elegir la dificultad")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
-
                 Spacer()
-
                 Button("Siguiente") { onNext() }
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .foregroundColor(Color.appGreen.opacity(0.95))
             }
-            .padding(.top, 4)
         }
     }
 
-    /// Gira y “encastra” en una posición fija para que las labels queden iguales a la referencia.
-    private func spinSnap() {
+    private func centerAngle(for d: DestinyBetFlowPopup.Difficulty) -> Double {
+        switch d {
+        case .easy: return 90
+        case .hard: return 210
+        case .medium: return 330
+        }
+    }
+
+    private func spinSnap3() {
         guard !isSpinning else { return }
         isSpinning = true
 
         let winner = DestinyBetFlowPopup.Difficulty.allCases.randomElement() ?? .medium
-
-        // Ángulo “centro” de cada label según cómo las dibujaste:
-        // FÁCIL: arriba (con tilt 30)
-        // MEDIO: derecha (tilt 120)
-        // DIFÍCIL: abajo (tilt 210)
-        // INSANO: izquierda (tilt 300)
-        //
-        // Queremos que el GANADOR quede en la flecha (arriba).
-        // Entonces el target rotation es: -(angleDelWinner) + jitter + n vueltas.
-        let centerAngle: Double = {
-            switch winner {
-            case .easy: return 0
-            case .medium: return 90
-            case .hard: return 180
-            case .insane: return 270
-            }
-        }()
+        let pointerAngle: Double = 90
+        let winnerCenter = centerAngle(for: winner)
 
         let extraTurns = Double(Int.random(in: 4...7)) * 360.0
         let jitter = Double.random(in: -6...6)
 
-        // Hacemos continuidad: calculamos la rot actual normalizada
         let currentNormalized = rotation.truncatingRemainder(dividingBy: 360)
-        let targetNormalized = (-centerAngle + jitter).truncatingRemainder(dividingBy: 360)
+        let targetNormalized = (pointerAngle - winnerCenter + jitter).truncatingRemainder(dividingBy: 360)
         let deltaToSnap = targetNormalized - currentNormalized
 
-        let target = rotation + extraTurns + deltaToSnap
-
         withAnimation(.easeInOut(duration: 1.25)) {
-            rotation = target
+            rotation = rotation + extraTurns + deltaToSnap
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.27) {
@@ -416,9 +433,7 @@ private struct WheelCard: View {
     }
 }
 
-// MARK: - Wheel Drawing (igual a la imagen)
-
-private struct DifficultyWheel: View {
+private struct DifficultyWheel3: View {
     let size: CGFloat
     let rotation: Double
 
@@ -443,58 +458,52 @@ private struct DifficultyWheel: View {
 
                 Circle()
                     .fill(Color.black.opacity(0.35))
-                    .frame(width: size * 0.28, height: size * 0.28)
+                    .frame(width: size * 0.18, height: size * 0.28)
 
                 Circle()
                     .stroke(Color.appGreen.opacity(0.30), lineWidth: 2)
-                    .frame(width: size * 0.28, height: size * 0.28)
+                    .frame(width: size * 0.18, height: size * 0.28)
             }
         }
-        .padding(.top, 2)
     }
 
     private var wheelBody: some View {
         ZStack {
-            Circle()
-                .fill(Color.white.opacity(0.04))
+            Circle().fill(Color.white.opacity(0.04))
+            Circle().stroke(Color.appGreen.opacity(0.55), lineWidth: 2)
 
-            Circle()
-                .stroke(Color.appGreen.opacity(0.55), lineWidth: 2)
+            SliceShape(start: 30, end: 150)
+                .fill(Color.appGreen.opacity(0.42))
+                .overlay(SliceShape(start: 30, end: 150).stroke(Color.black.opacity(0.10), lineWidth: 1))
 
-            // 4 cuadrantes
-            ForEach(0..<4) { i in
-                QuadrantShape(index: i)
-                    .fill(i % 2 == 0 ? Color.appGreen.opacity(0.42) : Color.appGreen.opacity(0.28))
-                    .overlay(
-                        QuadrantShape(index: i)
-                            .stroke(Color.black.opacity(0.10), lineWidth: 1)
-                    )
-            }
+            SliceShape(start: 150, end: 270)
+                .fill(Color.appGreen.opacity(0.28))
+                .overlay(SliceShape(start: 150, end: 270).stroke(Color.black.opacity(0.10), lineWidth: 1))
 
-            // Labels diagonales (como la referencia)
-            ZStack {
-                Text("FÁCIL")
-                    .wheelBigLabel()
-                    .offset(y: (size * 0.30))
-                    .rotationEffect(.degrees(40))
+            SliceShape(start: 270, end: 390)
+                .fill(Color.appGreen.opacity(0.34))
+                .overlay(SliceShape(start: 270, end: 390).stroke(Color.black.opacity(0.10), lineWidth: 1))
 
-                Text("MEDIO")
-                    .wheelBigLabel()
-                    .offset(y: (size * 0.30))
-                    .rotationEffect(.degrees(140))
-
-                Text("DIFÍCIL")
-                    .wheelBigLabel()
-                    .offset(y: (size * 0.30))
-                    .rotationEffect(.degrees(220))
-
-                Text("INSANO")
-                    .wheelBigLabel()
-                    .offset(y: (size * 0.30))
-                    .rotationEffect(.degrees(310))
-            }
+            WheelSliceLabel(text: "FÁCIL", angleDeg: 90, radius: size * 0.28)
+            WheelSliceLabel(text: "DIFÍCIL", angleDeg: 210, radius: size * 0.28)
+            WheelSliceLabel(text: "MEDIO", angleDeg: 330, radius: size * 0.28)
         }
         .padding(10)
+    }
+}
+
+private struct SliceShape: Shape {
+    let start: Double
+    let end: Double
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        var p = Path()
+        p.move(to: center)
+        p.addArc(center: center, radius: radius, startAngle: .degrees(start), endAngle: .degrees(end), clockwise: false)
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -506,27 +515,10 @@ private extension Text {
     }
 }
 
-private struct QuadrantShape: Shape {
-    let index: Int // 0..3
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        let start = Angle.degrees(Double(index) * 90.0)
-        let end = Angle.degrees(Double(index + 1) * 90.0)
-
-        var p = Path()
-        p.move(to: center)
-        p.addArc(center: center, radius: radius, startAngle: start, endAngle: end, clockwise: false)
-        p.closeSubpath()
-        return p
-    }
-}
-
-// MARK: - Step 3: Dice (FUNCIONAL)
+// MARK: - Step 3: Dice
 
 private struct DiceCard: View {
     @Binding var current: DestinyBetFlowPopup.Focus
-
     let onClose: () -> Void
     let onBack: () -> Void
     let onNext: () -> Void
@@ -541,31 +533,21 @@ private struct DiceCard: View {
             BetPopupHeader(
                 icon: "die.face.5.fill",
                 title: "Tirá los dados",
-                subtitle: "Descubrí tu objetivo",
+                subtitle: "Descubrí el enfoque",
                 onClose: onClose
             )
 
-            DiceArea(
-                rotation: diceRotation,
-                scale: diceScale,
-                pipCount: pipCount
-            )
+            DiceArea(rotation: diceRotation, scale: diceScale, pipCount: pipCount)
 
             BetPill(text: "Actual: \(current.chip)", isActive: true)
 
             HStack(spacing: 18) {
-                Text("Superior")
-                Text("Inferior")
-                Text("Abdomen")
-                Text("Cardio")
+                Text("Superior"); Text("Inferior"); Text("Abdomen"); Text("Cardio")
             }
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .foregroundColor(.white.opacity(0.45))
 
-            BetPrimaryButton(title: "TIRAR", isDisabled: isRolling) {
-                roll()
-            }
-
+            BetPrimaryButton(title: "TIRAR", isDisabled: isRolling) { roll() }
             BetSecondaryButton(title: "Volver", action: onBack)
 
             HStack {
@@ -584,19 +566,13 @@ private struct DiceCard: View {
         let newFocus = DestinyBetFlowPopup.Focus.allCases.randomElement() ?? .upper
         let newPips = Int.random(in: 1...6)
 
-        withAnimation(.easeInOut(duration: 0.18)) {
-            diceScale = 0.92
-        }
-
+        withAnimation(.easeInOut(duration: 0.18)) { diceScale = 0.92 }
         withAnimation(.easeInOut(duration: 0.9)) {
             diceRotation += Double(Int.random(in: 2...5)) * 360
             diceScale = 1.0
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            pipCount = newPips
-        }
-
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { pipCount = newPips }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
             current = newFocus
             isRolling = false
@@ -610,32 +586,24 @@ private struct DiceArea: View {
     let pipCount: Int
 
     var body: some View {
-        VStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .frame(height: 260)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.appGreen.opacity(0.22), lineWidth: 1)
-                )
-                .overlay(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                            .frame(width: 140, height: 140)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(Color.appGreen.opacity(0.22), lineWidth: 1)
-                            )
-                            .rotationEffect(.degrees(rotation))
-                            .scaleEffect(scale)
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+            .frame(height: 260)
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.appGreen.opacity(0.22), lineWidth: 1))
+            .overlay(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
+                        .frame(width: 140, height: 140)
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.appGreen.opacity(0.22), lineWidth: 1))
+                        .rotationEffect(.degrees(rotation))
+                        .scaleEffect(scale)
 
-                        DicePips(count: pipCount)
-                            .rotationEffect(.degrees(rotation))
-                            .scaleEffect(scale)
-                    }
-                )
-        }
+                    DicePips(count: pipCount)
+                        .rotationEffect(.degrees(rotation))
+                        .scaleEffect(scale)
+                }
+            )
     }
 }
 
@@ -644,11 +612,9 @@ private struct DicePips: View {
 
     var body: some View {
         let positions = pipPositions(for: count)
-
         ZStack {
             ForEach(0..<positions.count, id: \.self) { i in
-                Circle()
-                    .fill(Color.white.opacity(0.85))
+                Circle().fill(Color.white.opacity(0.85))
                     .frame(width: 10, height: 10)
                     .offset(x: positions[i].x, y: positions[i].y)
             }
@@ -683,6 +649,7 @@ private struct DurationCard: View {
     let onClose: () -> Void
     let onBack: () -> Void
     let onSelect: (DestinyBetFlowPopup.DurationType) -> Void
+    let onNext: () -> Void
     let onRandom: () -> Void
 
     var body: some View {
@@ -703,13 +670,13 @@ private struct DurationCard: View {
                 }
             }
 
-            Text("Seleccionado: \(selected == .daily ? "Diario" : "Corta")")
+            Text("Seleccionado: \(selected == .daily ? "Diario (24h)" : "Corta (3h)")")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.55))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
 
-            BetPrimaryButton(title: "ALEATORIO", action: onRandom)
+            BetPrimaryButton(title: "Siguiente", action: onNext)
+            BetSecondaryButton(title: "ALEATORIO", action: onRandom)
             BetSecondaryButton(title: "Volver", action: onBack)
         }
     }
@@ -762,52 +729,41 @@ private struct AcceptedCard: View {
     let focus: DestinyBetFlowPopup.Focus
     let duration: DestinyBetFlowPopup.DurationType
 
+    let isStarting: Bool
+    let errorMessage: String?
+
     let onClose: () -> Void
-    let onStartMission: () -> Void
+    let onBack: () -> Void
+    let onStartBet: () -> Void
 
     var body: some View {
         BetPopupContainer {
             BetPopupHeader(
                 icon: "die.face.5.fill",
-                title: "Misión aceptada",
+                title: "Apuesta lista",
                 subtitle: "Tu destino está sellado",
                 onClose: onClose
             )
 
             VStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(Color.appGreen.opacity(0.14))
-                        .frame(width: 86, height: 86)
-                        .overlay(Circle().stroke(Color.appGreen.opacity(0.35), lineWidth: 1))
-
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 34, weight: .heavy))
-                        .foregroundColor(.white.opacity(0.90))
-                }
-                .padding(.top, 4)
-
-                Text("¡Tu misión te espera!")
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.92))
-
                 HStack(spacing: 10) {
-                    BetPill(text: difficulty.pillText.capitalized, isActive: true)
+                    BetPill(text: difficulty.pillText, isActive: true)
                     BetPill(text: focus.rawValue, isActive: true)
+                    BetPill(text: duration.pill, isActive: true)
                 }
 
-                HStack(spacing: 10) {
-                    BetPill(text: duration == .daily ? "Diario" : "Corta", isActive: true)
-                    BetPill(text: "Hasta +3 ELO", isActive: true)
+                if let err = errorMessage, !err.isEmpty {
+                    Text(err)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.red.opacity(0.9))
+                        .multilineTextAlignment(.center)
                 }
 
-                Text("Dificultad, foco y duración fueron elegidos por el destino.")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 6)
+                BetPrimaryButton(title: isStarting ? "CREANDO..." : "INICIAR APUESTA", isDisabled: isStarting) {
+                    onStartBet()
+                }
 
-                BetPrimaryButton(title: "INICIAR MISIÓN", action: onStartMission)
+                BetSecondaryButton(title: "Volver", action: onBack)
             }
         }
     }
@@ -826,13 +782,23 @@ private struct Triangle: Shape {
     }
 }
 
-// MARK: - Preview (usa tu CenterModalOverlay global)
+private struct WheelSliceLabel: View {
+    let text: String
+    let angleDeg: Double
+    let radius: CGFloat
 
-#Preview {
-    ZStack {
-        AppBackground().ignoresSafeArea()
-        CenterModalOverlay(isPresented: .constant(true)) {
-            DestinyBetFlowPopup(onClose: {})
-        }
+    var body: some View {
+        let rad = angleDeg * Double.pi / 180.0
+        let x = CGFloat(cos(rad)) * radius
+        let y = CGFloat(sin(rad)) * radius
+
+        return Text(text)
+            .font(.system(size: 16, weight: .heavy, design: .rounded))
+            .foregroundColor(.white.opacity(0.85))
+            .minimumScaleFactor(0.75)
+            .allowsTightening(true)
+            // si querés que queden “inclinados” como antes:
+            .rotationEffect(.degrees(angleDeg))
+            .offset(x: x, y: y)
     }
 }
