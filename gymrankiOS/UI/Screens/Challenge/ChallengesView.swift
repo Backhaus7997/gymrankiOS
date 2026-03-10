@@ -246,7 +246,6 @@ struct ChallengesView: View {
     @State private var route: Route? = nil
     @State private var selectedEntry: ChallengesHomeVM.Entry? = nil
 
-    @State private var showEquipmentSheet = false
     @State private var showDestinyBetPopup = false
 
     private let sidePadding: CGFloat = 16
@@ -271,17 +270,9 @@ struct ChallengesView: View {
         var id: String { String(describing: self) }
     }
 
-    private let items: [QuickCard] = [
-        .init(title: "Descubrir", subtitle: "Nuevos desafíos", icon: "magnifyingglass"),
-        .init(title: "Misiones", subtitle: "Crear y gestionar", icon: "checklist"),
-        .init(title: "Apuestas", subtitle: "Rueda y dados", icon: "die.face.5"),
-        .init(title: "Equipamiento", subtitle: "Tus ítems y stats", icon: "wrench.and.screwdriver")
-    ]
-
-    private let columns: [GridItem] = [
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14)
-    ]
+    private let betCard = QuickCard(title: "Apuestas", subtitle: "Rueda y dados", icon: "die.face.5")
+    private let missionsCard = QuickCard(title: "Misiones", subtitle: "Crear y gestionar", icon: "checklist")
+    private let discoverWideCard = QuickCard(title: "Descubrir desafíos", subtitle: "Nuevos desafíos", icon: "magnifyingglass")
 
     private var listToShow: [ChallengesHomeVM.Entry] {
         selected == .pending ? vm.activeEntries : vm.completedEntries
@@ -302,7 +293,8 @@ struct ChallengesView: View {
                 VStack(alignment: .leading, spacing: 16) {
 
                     topBar
-                    quickActionsGrid
+
+                    quickActionsNewLayout
 
                     Text("Vista:")
                         .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -352,14 +344,6 @@ struct ChallengesView: View {
                 ActiveBetDetailView(active: b) { Task { await reload() } }
             }
         }
-        .sheet(isPresented: $showEquipmentSheet) {
-            EquipmentView { selectedItems in
-                print("Equipamiento elegido:", selectedItems)
-            }
-            .presentationDetents([.fraction(0.70), .large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(22)
-        }
         .alert("Error", isPresented: showError, actions: {
             Button("OK") { vm.errorMessage = nil }
         }, message: {
@@ -396,26 +380,29 @@ struct ChallengesView: View {
         .padding(.top, 6)
     }
 
-    // MARK: - Grid
+    // MARK: - Quick actions (NEW layout)
 
-    private var quickActionsGrid: some View {
-        LazyVGrid(columns: columns, spacing: 14) {
-            ForEach(items) { item in
-                Button { handleQuickTap(item.title) } label: {
-                    QuickCardView(item: item)
+    private var quickActionsNewLayout: some View {
+        VStack(spacing: 14) {
+
+            // Arriba: Apuestas + Misiones
+            HStack(spacing: 14) {
+                Button { showDestinyBetPopup = true } label: {
+                    QuickCardView(item: betCard)
+                }
+                .buttonStyle(.plain)
+
+                Button { route = .missions } label: {
+                    QuickCardView(item: missionsCard)
                 }
                 .buttonStyle(.plain)
             }
-        }
-    }
 
-    private func handleQuickTap(_ title: String) {
-        switch title {
-        case "Descubrir": route = .discover
-        case "Misiones": route = .missions
-        case "Equipamiento": showEquipmentSheet = true
-        case "Apuestas": showDestinyBetPopup = true
-        default: break
+            // Abajo: Descubrir (full width)
+            Button { route = .discover } label: {
+                WideQuickCardView(item: discoverWideCard)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -505,7 +492,7 @@ struct ChallengesView: View {
     }
 }
 
-// MARK: - Card
+// MARK: - Card (Desafío/Misión/Apuesta)
 
 private struct HomeEntryCard: View {
     let entry: ChallengesHomeVM.Entry
@@ -616,8 +603,13 @@ private struct QuickCard: Identifiable {
 private struct QuickCardView: View {
     let item: QuickCard
 
+    private var isDiscover: Bool {
+        item.title == "Descubrir desafíos"
+    }
+
     var body: some View {
         HStack(spacing: 12) {
+
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.appGreen.opacity(0.18))
@@ -628,18 +620,21 @@ private struct QuickCardView: View {
                     .foregroundColor(Color.appGreen.opacity(0.95))
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: isDiscover ? 6 : 4) {
                 Text(item.title)
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .font(.system(size: isDiscover ? 16 : 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.92))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(isDiscover ? 0.90 : 0.75)
                     .allowsTightening(true)
 
                 Text(item.subtitle)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
+                    .font(.system(size: isDiscover ? 13 : 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.60))
                     .lineLimit(2)
+                    .minimumScaleFactor(isDiscover ? 0.95 : 0.85)
+                    .allowsTightening(true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -648,11 +643,23 @@ private struct QuickCardView: View {
                 .frame(width: 3, height: 18)
         }
         .padding(14)
-        .frame(height: 92)
+        .frame(height: isDiscover ? 98 : 92)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.06))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.appGreen.opacity(0.20), lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.appGreen.opacity(0.20), lineWidth: 1)
+                )
         )
+    }
+}
+
+private struct WideQuickCardView: View {
+    let item: QuickCard
+
+    var body: some View {
+        QuickCardView(item: item)
+            .frame(maxWidth: .infinity)
     }
 }
