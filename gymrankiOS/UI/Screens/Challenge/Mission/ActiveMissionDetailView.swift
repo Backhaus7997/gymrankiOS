@@ -19,6 +19,7 @@ struct ActiveMissionDetailView: View {
     @State private var showConfirmCancel = false
     @State private var showConfirmComplete = false
     @State private var errorMessage: String?
+    @State private var showCongrats = false
 
     private let repo = MissionRepository()
     private let userRepo = UserRepository.shared
@@ -31,7 +32,6 @@ struct ActiveMissionDetailView: View {
     private var remainingDays: Int { max(0, totalDays - elapsedDays) }
 
     private var canMarkCompleted: Bool {
-        // ✅ Misiones “instantáneas” (durationDays == 0) se pueden completar siempre
         if active.template.durationDays == 0 { return true }
 
         guard active.template.durationDays > 0 else { return false }
@@ -44,13 +44,9 @@ struct ActiveMissionDetailView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
-
                     topBar
-
                     headerCard
-
                     infoRow
-
                     progressCard
 
                     if let goal = active.template.goalWorkouts {
@@ -62,6 +58,23 @@ struct ActiveMissionDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 10)
+            }
+
+            if showCongrats {
+                CenterModalOverlay(isPresented: $showCongrats) {
+                    CompletionCongratsPopup(
+                        kind: .mission,
+                        itemTitle: active.template.title,
+                        points: active.template.points,
+                        onClose: {
+                            showCongrats = false
+                            onStatusChanged()
+                            dismiss()
+                        }
+                    )
+                    .padding(.horizontal, 18)
+                }
+                .zIndex(60)
             }
         }
         .safeAreaInset(edge: .bottom) { footerButtons }
@@ -88,7 +101,6 @@ struct ActiveMissionDetailView: View {
             Text("Se moverá a Completados y sumará puntos.")
         }
     }
-
     // MARK: UI
 
     private var topBar: some View {
@@ -317,7 +329,6 @@ struct ActiveMissionDetailView: View {
     }
 
     // MARK: Actions
-
     @MainActor
     private func setStatus(_ status: String) async {
         guard !uid.isEmpty else {
@@ -330,19 +341,30 @@ struct ActiveMissionDetailView: View {
 
         do {
             if status == UserMissionStatus.completed {
-                _ = try await userRepo.completeMissionAndAwardPoints(
+
+                let awarded = try await userRepo.completeMissionAndAwardPoints(
                     uid: uid,
                     templateId: active.template.id,
                     points: active.template.points
                 )
+
+                // ✅ si ya estaba completada por algún motivo, cerramos normal
+                if awarded {
+                    showCongrats = true
+                    return
+                } else {
+                    onStatusChanged()
+                    dismiss()
+                    return
+                }
+
             } else {
                 try await repo.setUserMissionStatus(uid: uid, templateId: active.template.id, status: status)
+                onStatusChanged()
+                dismiss()
             }
 
-            onStatusChanged()
-            dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-}
+    }}

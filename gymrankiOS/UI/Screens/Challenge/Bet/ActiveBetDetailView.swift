@@ -18,6 +18,7 @@ struct ActiveBetDetailView: View {
     @State private var progress: [Int] = []
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showCongrats = false
 
     private let repo = BetRepository()
     private let userRepo = UserRepository.shared
@@ -50,6 +51,24 @@ struct ActiveBetDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
             }
+            
+            if showCongrats {
+                CenterModalOverlay(isPresented: $showCongrats) {
+                    CompletionCongratsPopup(
+                        kind: .bet, // o .challenge / .mission
+                        itemTitle: active.template.title,
+                        points: active.template.points,
+                        onClose: {
+                            showCongrats = false
+                            onStatusChanged()
+                            dismiss()
+                        }
+                    )
+                    .padding(.horizontal, 18)
+                }
+                .zIndex(60)
+            }
+
         }
         .safeAreaInset(edge: .bottom) { footer }
         .onAppear {
@@ -278,14 +297,21 @@ struct ActiveBetDetailView: View {
             isSaving = true
             defer { isSaving = false }
 
-            _ = try await userRepo.completeBetAndAwardPoints(
+            let awarded = try await userRepo.completeBetAndAwardPoints(
                 uid: uid,
                 templateId: active.template.id,
                 points: active.template.points
             )
 
-            onStatusChanged()
-            dismiss()
+            if awarded {
+                showCongrats = true
+                return
+            } else {
+                onStatusChanged()
+                dismiss()
+                return
+            }
+
         } catch {
             errorMessage = error.localizedDescription
         }

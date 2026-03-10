@@ -16,6 +16,7 @@ struct ChallengeDetailView: View {
 
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showCongrats = false
 
     private let repo = ChallengeRepository()
 

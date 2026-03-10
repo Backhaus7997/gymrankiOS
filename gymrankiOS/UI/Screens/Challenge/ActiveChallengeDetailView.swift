@@ -19,6 +19,7 @@ struct ActiveChallengeDetailView: View {
     @State private var showConfirmCancel = false
     @State private var showConfirmComplete = false
     @State private var errorMessage: String?
+    @State private var showCongrats = false
 
     private let repo = ChallengeRepository()
     private let userRepo = UserRepository.shared
@@ -31,14 +32,13 @@ struct ActiveChallengeDetailView: View {
     private var remainingDays: Int { max(0, totalDays - elapsedDays) }
 
     private var canMarkCompleted: Bool {
-        // ✅ Si durationDays == 0 -> se puede completar siempre (acciones instantáneas)
         if active.template.durationDays == 0 { return true }
 
         guard active.template.durationDays > 0 else { return false }
         return active.elapsedDays >= active.template.durationDays
     }
 
-    var body: some View {
+    var body: some View {        
         ZStack {
             AppBackground().ignoresSafeArea()
 
@@ -56,6 +56,24 @@ struct ActiveChallengeDetailView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 10)
             }
+            
+            if showCongrats {
+                CenterModalOverlay(isPresented: $showCongrats) {
+                    CompletionCongratsPopup(
+                        kind: .challenge,
+                        itemTitle: active.template.title,
+                        points: active.template.points,
+                        onClose: {
+                            showCongrats = false
+                            onStatusChanged()
+                            dismiss()
+                        }
+                    )
+                    .padding(.horizontal, 18)
+                }
+                .zIndex(60)
+            }
+
         }
         .safeAreaInset(edge: .bottom) { footerButtons }
         .navigationBarBackButtonHidden(true)
@@ -299,15 +317,20 @@ struct ActiveChallengeDetailView: View {
 
         do {
             if status == UserChallengeStatus.completed {
-                _ = try await userRepo.completeChallengeAndAwardPoints(
+                let awarded = try await userRepo.completeChallengeAndAwardPoints(
                     uid: uid,
                     templateId: active.template.id,
                     points: active.template.points
                 )
-            } else {
-                try await repo.setUserChallengeStatus(uid: uid, templateId: active.template.id, status: status)
+                if awarded {
+                    showCongrats = true
+                    return
+                } else {
+                    onStatusChanged()
+                    dismiss()
+                    return
+                }
             }
-
             onStatusChanged()
             dismiss()
         } catch {
