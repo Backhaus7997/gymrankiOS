@@ -20,7 +20,7 @@ struct MainView: View {
     let onGoToRanking: () -> Void
 
     private let sideMargin: CGFloat = 12
-    private let topBarHeight: CGFloat = 96   // ajustable si querés
+    private let topBarHeight: CGFloat = 96
 
     @State private var showProfileSheet = false
     @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
@@ -64,8 +64,10 @@ struct MainView: View {
                             MuscleRadarRankCard(vm: setsVM)
                         }
                         .frame(width: contentWidth, alignment: .center)
-                        .padding(.top, topBarHeight)   // ✅ arranca justo debajo del top bar
-                        .padding(.bottom, 120)
+                        .padding(.top, topBarHeight)
+                        .safeAreaInset(edge: .bottom) {
+                            Color.clear.frame(height: 16)
+                        }
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .coordinateSpace(name: "mainScroll")

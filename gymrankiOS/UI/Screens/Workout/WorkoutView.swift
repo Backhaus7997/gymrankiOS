@@ -436,10 +436,13 @@ private struct MyRoutinesCard: View {
                     }
                 }
             }
+
+            // ✅ Esto empuja todo el contenido hacia arriba dentro del minHeight
+            Spacer(minLength: 0)
         }
         .padding(14)
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 260)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(minHeight: 260, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(Color.white.opacity(0.06))
