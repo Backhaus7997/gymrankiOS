@@ -11,7 +11,7 @@ final class CreateRoutineViewModel: ObservableObject {
     @Published var title: String = ""
     @Published var description: String = ""
 
-    /// IMPORTANTE: cada RoutineExercise debe tener id único.
+    /// Cada RoutineExercise debe tener id único para bindings/UI.
     @Published var exercises: [RoutineExercise] = [
         RoutineExercise(id: UUID().uuidString)
     ]
@@ -21,6 +21,44 @@ final class CreateRoutineViewModel: ObservableObject {
     @Published var didSave: Bool = false
 
     private let repo = RoutineRepository()
+
+    init(source: RoutineDraftSource = .new) {
+        hydrate(from: source)
+    }
+
+    func hydrate(from source: RoutineDraftSource) {
+        didSave = false
+        errorMessage = nil
+
+        switch source {
+        case .new:
+            title = ""
+            description = ""
+            exercises = [RoutineExercise(id: UUID().uuidString)]
+
+        case .fromTemplate(let routine):
+            title = routine.title
+            description = routine.description ?? ""
+
+            let copiedExercises = routine.exercises.map { ex in
+                RoutineExercise(
+                    id: UUID().uuidString,   // nuevo id local
+                    exerciseId: ex.exerciseId,
+                    name: ex.name,
+                    sets: ex.sets,
+                    reps: ex.reps,
+                    usesBodyweight: ex.usesBodyweight,
+                    weightKg: ex.weightKg,
+                    weekday: ex.weekday,
+                    muscles: ex.muscles
+                )
+            }
+
+            exercises = copiedExercises.isEmpty
+                ? [RoutineExercise(id: UUID().uuidString)]
+                : copiedExercises
+        }
+    }
 
     func addExercise() {
         exercises.append(RoutineExercise(id: UUID().uuidString))
@@ -34,7 +72,7 @@ final class CreateRoutineViewModel: ObservableObject {
         }
     }
 
-    /// Guarda la rutina asociada al usuario
+    /// Guarda SIEMPRE como rutina nueva.
     func save(userId: String) async {
         errorMessage = nil
         didSave = false
@@ -51,11 +89,15 @@ final class CreateRoutineViewModel: ObservableObject {
             return
         }
 
-        // Limpieza: nombre trim + filtrar vacíos
         var cleanedExercises: [RoutineExercise] = exercises
             .map { ex in
                 var copy = ex
                 copy.name = ex.name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if copy.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    copy.id = UUID().uuidString
+                }
+
                 return copy
             }
             .filter { !$0.name.isEmpty }
@@ -65,7 +107,6 @@ final class CreateRoutineViewModel: ObservableObject {
             return
         }
 
-        // Validación y normalización
         for i in cleanedExercises.indices {
             let ex = cleanedExercises[i]
 
@@ -76,15 +117,9 @@ final class CreateRoutineViewModel: ObservableObject {
 
             if ex.usesBodyweight {
                 cleanedExercises[i].weightKg = nil
-            } else {
-                if let w = ex.weightKg, w < 0 {
-                    errorMessage = "El peso no puede ser negativo (ejercicio #\(i + 1))."
-                    return
-                }
-            }
-
-            if cleanedExercises[i].id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                cleanedExercises[i].id = UUID().uuidString
+            } else if let w = ex.weightKg, w < 0 {
+                errorMessage = "El peso no puede ser negativo (ejercicio #\(i + 1))."
+                return
             }
         }
 
@@ -95,7 +130,7 @@ final class CreateRoutineViewModel: ObservableObject {
             let now = Date()
 
             let routine = WorkoutRoutine(
-                id: UUID().uuidString,
+                id: UUID().uuidString, // siempre NUEVA
                 userId: uid,
                 title: cleanTitle,
                 description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -104,13 +139,13 @@ final class CreateRoutineViewModel: ObservableObject {
                 createdAt: now,
                 updatedAt: now,
                 exercises: cleanedExercises,
-                authorFeedVisibility: nil // ✅ se completa en RoutineRepository leyendo el user
+                authorFeedVisibility: nil
             )
 
             try await repo.createRoutine(routine)
             didSave = true
 
-            // reset form
+            // reset del form después de guardar
             title = ""
             description = ""
             exercises = [RoutineExercise(id: UUID().uuidString)]

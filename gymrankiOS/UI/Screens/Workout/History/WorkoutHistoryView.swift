@@ -8,6 +8,10 @@ struct WorkoutHistoryView: View {
     @StateObject private var vm = WorkoutHistoryViewModel()
     @State private var selectedRoutine: WorkoutRoutine? = nil
 
+    // ✅ para usar una rutina vieja como base
+    @State private var templateRoutineToCreate: WorkoutRoutine? = nil
+    @State private var showCreateRoutineSheet = false
+
     var body: some View {
         ZStack {
             AppBackground().ignoresSafeArea()
@@ -31,6 +35,19 @@ struct WorkoutHistoryView: View {
         }
         .navigationBarBackButtonHidden(true)
         .task { await loadIfPossible() }
+        .sheet(isPresented: $showCreateRoutineSheet) {
+            NavigationStack {
+                if let routine = templateRoutineToCreate {
+                    CreateRoutineView(source: .fromTemplate(routine))
+                        .environmentObject(session)
+                } else {
+                    CreateRoutineView(source: .new)
+                        .environmentObject(session)
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var centeredRoutineModal: some View {
@@ -67,7 +84,7 @@ struct WorkoutHistoryView: View {
         guard !uid.isEmpty else { return }
         await vm.load(userId: uid)
     }
-    
+
     // MARK: - TopBar
 
     private func topBar(title: String) -> some View {
@@ -245,25 +262,40 @@ struct WorkoutHistoryView: View {
 
     private func historyRoutineCard(_ routine: WorkoutRoutine) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(alignment: .top, spacing: 12) {
                 Text(routine.title)
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.92))
 
                 Spacer()
 
-                Button {
-                    selectedRoutine = routine
-                } label: {
-                    Text("Detalles")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .foregroundColor(Color.appGreen.opacity(0.95))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.white.opacity(0.06)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+                VStack(spacing: 8) {
+                    Button {
+                        templateRoutineToCreate = routine
+                        showCreateRoutineSheet = true
+                    } label: {
+                        Text("Usar como base")
+                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .frame(width: 132, height: 34)
+                            .background(Capsule().fill(Color.appGreen.opacity(0.95)))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        selectedRoutine = routine
+                    } label: {
+                        Text("Detalles")
+                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                            .foregroundColor(Color.appGreen.opacity(0.95))
+                            .frame(width: 132, height: 34)
+                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .overlay(
+                                Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
             VStack(alignment: .leading, spacing: 8) {

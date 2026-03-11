@@ -4,14 +4,13 @@ struct WorkoutView: View {
 
     @EnvironmentObject private var session: SessionManager
 
-    // ✅ Rutinas (plantillas) para "Mis entrenamientos"
     @StateObject private var routinesVM = MyRoutinesViewModel()
-
-    // ✅ Plan semanal (MainView / UserDefaults) para RECUPERACIÓN
     @State private var routinePlan: RoutinePlan = RoutineStorage.load() ?? RoutinePlan()
 
-    // Modal de detalles de rutina (el que ya tenías)
     @State private var selectedRoutine: WorkoutRoutine? = nil
+
+    @State private var templateRoutineToCreate: WorkoutRoutine? = nil
+    @State private var showCreateRoutineSheet = false
 
     private var uid: String { session.userId ?? "" }
 
@@ -27,15 +26,21 @@ struct WorkoutView: View {
                         VStack(spacing: 14) {
                             QuickActionsGrid()
 
-                            // ✅ Recuperación basada en el PLAN semanal (Mi rutina)
                             RecoveryCard(plan: routinePlan)
 
-                            // ✅ Mis entrenamientos (routines de Firebase)
                             MyRoutinesCard(
                                 vm: routinesVM,
                                 uid: uid,
+                                onCreateNew: {
+                                    templateRoutineToCreate = nil
+                                    showCreateRoutineSheet = true
+                                },
                                 onDetails: { routine in
                                     selectedRoutine = routine
+                                },
+                                onUseAsBase: { routine in
+                                    templateRoutineToCreate = routine
+                                    showCreateRoutineSheet = true
                                 }
                             )
                         }
@@ -44,7 +49,6 @@ struct WorkoutView: View {
                     }
                 }
 
-                // ✅ Modal centrado (reusa RoutineDetailSheet)
                 if let routine = selectedRoutine {
                     ZStack {
                         Color.black.opacity(0.55)
@@ -74,9 +78,21 @@ struct WorkoutView: View {
                 guard !uid.isEmpty else { return }
                 await routinesVM.load(userId: uid)
             }
-            // ✅ Cada vez que entrás a Workout, refresca el plan desde UserDefaults
             .onAppear {
                 routinePlan = RoutineStorage.load() ?? RoutinePlan()
+            }
+            .sheet(isPresented: $showCreateRoutineSheet) {
+                NavigationStack {
+                    if let routine = templateRoutineToCreate {
+                        CreateRoutineView(source: .fromTemplate(routine))
+                            .environmentObject(session)
+                    } else {
+                        CreateRoutineView(source: .new)
+                            .environmentObject(session)
+                    }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -198,7 +214,7 @@ private struct QuickActionCard: View {
     }
 }
 
-// MARK: - Recovery (basado en el plan semanal - Mi rutina)
+// MARK: - Recovery
 
 private struct RecoveryCard: View {
 
@@ -269,7 +285,7 @@ private struct RecoveryCard: View {
 
 private struct RecoverySmallCard: View {
     let title: String
-    let percent: Double // 0...1
+    let percent: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -283,7 +299,7 @@ private struct RecoverySmallCard: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Color.appGreen.opacity(0.95))
             }
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .center) // controla layout
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .center)
             .padding(.top, 2)
 
             Text(title)
@@ -316,7 +332,7 @@ private struct RecoverySmallCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .frame(height: 150) // mantenemos tu altura
+        .frame(height: 150)
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(Color.white.opacity(0.06))
@@ -353,7 +369,9 @@ private struct MyRoutinesCard: View {
     @ObservedObject var vm: MyRoutinesViewModel
     let uid: String
 
+    let onCreateNew: () -> Void
     let onDetails: (WorkoutRoutine) -> Void
+    let onUseAsBase: (WorkoutRoutine) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -365,9 +383,7 @@ private struct MyRoutinesCard: View {
 
                 Spacer()
 
-                NavigationLink {
-                    CreateRoutineView()
-                } label: {
+                Button(action: onCreateNew) {
                     Image(systemName: "plus")
                         .foregroundColor(.black)
                         .frame(width: 32, height: 32)
@@ -409,9 +425,7 @@ private struct MyRoutinesCard: View {
                     }
 
                 } else if vm.routines.isEmpty {
-                    NavigationLink {
-                        CreateRoutineView()
-                    } label: {
+                    Button(action: onCreateNew) {
                         HStack(spacing: 12) {
                             Text("📝").font(.system(size: 22))
                             Text("Carga tu primer entrenamiento")
@@ -430,14 +444,14 @@ private struct MyRoutinesCard: View {
                         ForEach(vm.routines.prefix(3)) { routine in
                             RoutineRow(
                                 routine: routine,
-                                onDetails: { onDetails(routine) }
+                                onDetails: { onDetails(routine) },
+                                onUseAsBase: { onUseAsBase(routine) }
                             )
                         }
                     }
                 }
             }
 
-            // ✅ Esto empuja todo el contenido hacia arriba dentro del minHeight
             Spacer(minLength: 0)
         }
         .padding(14)
@@ -457,6 +471,7 @@ private struct MyRoutinesCard: View {
 private struct RoutineRow: View {
     let routine: WorkoutRoutine
     let onDetails: () -> Void
+    let onUseAsBase: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -482,16 +497,28 @@ private struct RoutineRow: View {
 
             Spacer()
 
-            Button(action: onDetails) {
-                Text("Detalles")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .foregroundColor(Color.appGreen.opacity(0.95))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+            VStack(spacing: 8) {
+                Button(action: onUseAsBase) {
+                    Text("Usar como base")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundColor(.black)
+                        .frame(width: 132, height: 34)
+                        .background(Capsule().fill(Color.appGreen.opacity(0.95)))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onDetails) {
+                    Text("Detalles")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundColor(Color.appGreen.opacity(0.95))
+                        .frame(width: 132, height: 34)
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                        .overlay(
+                            Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -9,20 +9,33 @@ struct CreateRoutineView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: SessionManager
 
-    @StateObject private var vm = CreateRoutineViewModel()
+    @StateObject private var vm: CreateRoutineViewModel
     @State private var showError = false
 
     @State private var catalog: [ExercisesCatalogEntry] = ExercisesCatalogData.catalog
     @State private var selectedMuscles: Set<WorkoutMuscle> = []
-
     @State private var selectedWeekday: RoutineWeekday = .monday
 
     // Dropdown inline
     @State private var expandedExerciseId: String? = nil
     @State private var exerciseSearch: String = ""
 
+    @State private var didApplyInitialSelections = false
+
+    private let source: RoutineDraftSource
+
+    init(source: RoutineDraftSource = .new) {
+        self.source = source
+        _vm = StateObject(wrappedValue: CreateRoutineViewModel(source: source))
+    }
+
     private var uid: String { session.userId }
     private var canSave: Bool { !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private var isFromTemplate: Bool {
+        if case .fromTemplate = source { return true }
+        return false
+    }
 
     private var allExerciseNames: [String] {
         catalog.flatMap { $0.exercises }.uniqueSorted()
@@ -47,14 +60,10 @@ struct CreateRoutineView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
-
                         detailsCard
                         weekdayCard
                         musclesFilterCard
-
-                        // ✅ Header sin botón (el botón va fijo abajo)
                         exercisesHeaderNoButton
-
                         exercisesList
 
                         // espacio para la bottom bar
@@ -65,7 +74,7 @@ struct CreateRoutineView: View {
                 }
             }
 
-            // ✅ Barra fija abajo (Agregar + Guardar)
+            // Barra fija abajo
             VStack {
                 Spacer()
                 bottomBar
@@ -76,6 +85,9 @@ struct CreateRoutineView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(vm.errorMessage ?? "Ocurrió un error.")
+        }
+        .onAppear {
+            applyInitialSelectionsIfNeeded()
         }
         .onChange(of: selectedMuscles) { _ in
             expandedExerciseId = nil
@@ -98,11 +110,13 @@ struct CreateRoutineView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Crear entrenamiento")
+                Text(isFromTemplate ? "Nueva rutina desde plantilla" : "Crear entrenamiento")
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.95))
 
-                Text("Armá tu plantilla para seguir tu progreso")
+                Text(isFromTemplate
+                     ? "Usá una rutina guardada como base"
+                     : "Armá tu plantilla para seguir tu progreso")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             }
@@ -206,7 +220,7 @@ struct CreateRoutineView: View {
         .background(cardBackground)
     }
 
-    // MARK: - Exercises header (sin botón)
+    // MARK: - Exercises header
 
     private var exercisesHeaderNoButton: some View {
         HStack {
@@ -252,11 +266,10 @@ struct CreateRoutineView: View {
         }
     }
 
-    // MARK: - Bottom bar (sticky)
+    // MARK: - Bottom bar
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
-
             Button { vm.addExercise() } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus")
@@ -293,14 +306,16 @@ struct CreateRoutineView: View {
 
     private var saveButton: some View {
         PrimaryBottomButton(
-            title: vm.isLoading ? "GUARDANDO..." : "GUARDAR ENTRENAMIENTO",
+            title: vm.isLoading
+                ? "GUARDANDO..."
+                : (isFromTemplate ? "GUARDAR COMO NUEVO" : "GUARDAR ENTRENAMIENTO"),
             systemImage: "figure.strengthtraining.traditional"
         ) {
             Task {
                 let musclesToStore: [String] =
-                selectedMuscles.isEmpty
-                ? []
-                : selectedMuscles.map { $0.rawValue }
+                    selectedMuscles.isEmpty
+                    ? []
+                    : selectedMuscles.map { $0.rawValue }
 
                 vm.exercises = vm.exercises.map { ex in
                     var copy = ex
@@ -346,6 +361,26 @@ struct CreateRoutineView: View {
                 }
             }
         )
+    }
+
+    private func applyInitialSelectionsIfNeeded() {
+        guard !didApplyInitialSelections else { return }
+        didApplyInitialSelections = true
+
+        guard case .fromTemplate(let routine) = source else { return }
+
+        if let firstWeekdayRaw = routine.exercises.first?.weekday,
+           let weekday = RoutineWeekday(rawValue: firstWeekdayRaw) {
+            selectedWeekday = weekday
+        }
+
+        let muscles = Set(
+            routine.exercises
+                .flatMap { $0.muscles }
+                .compactMap { raw in WorkoutMuscle.allCases.first(where: { $0.rawValue == raw }) }
+        )
+
+        selectedMuscles = muscles
     }
 }
 
@@ -487,7 +522,6 @@ private struct ExerciseCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-
             headerRow
             dropdownHeaderButton
 
@@ -930,7 +964,7 @@ enum WorkoutMuscle: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-// MARK: - NEW: Weekday enum
+// MARK: - Weekday enum
 
 enum RoutineWeekday: Int, CaseIterable, Identifiable {
     case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
@@ -1091,11 +1125,11 @@ private struct WeightField: View {
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-            )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
         .opacity(isDisabled ? 0.55 : 1.0)
         .onAppear {
             if let v = value { text = "\(v)" }
@@ -1191,7 +1225,7 @@ private extension String {
 
 #Preview {
     NavigationStack {
-        CreateRoutineView()
+        CreateRoutineView(source: .new)
             .environmentObject(SessionManager())
     }
 }
