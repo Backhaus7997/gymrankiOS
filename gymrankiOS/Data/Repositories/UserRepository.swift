@@ -197,15 +197,27 @@ private extension Array {
 }
 
 extension UserRepository {
-
+    
     func updateAvatarUrl(uid: String, avatarUrl: String) async throws {
         let clean = uid.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
-
+        
         try await db.collection("users")
             .document(clean)
             .setData([
                 "avatarUrl": avatarUrl,
+                "updatedAt": Timestamp(date: Date())
+            ], merge: true)
+    }
+    
+    func updateCoverUrl(uid: String, coverUrl: String) async throws {
+        let clean = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        
+        try await db.collection("users")
+            .document(clean)
+            .setData([
+                "coverUrl": coverUrl,
                 "updatedAt": Timestamp(date: Date())
             ], merge: true)
     }
@@ -296,7 +308,7 @@ extension UserRepository {
     }
 }
 
-// MARK: - Complete challenge/mission + award points (✅ transacción correcta)
+// MARK: - Complete challenge/mission + award points
 
 extension UserRepository {
 
@@ -372,7 +384,6 @@ extension UserRepository {
         try await withCheckedThrowingContinuation { cont in
             db.runTransaction({ tx, errorPointer -> Any? in
                 do {
-                    // ✅ READS primero SIEMPRE
                     let itemSnap = try tx.getDocument(itemRef)
                     let userSnap = try tx.getDocument(userRef)
 

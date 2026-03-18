@@ -16,10 +16,7 @@ struct ProfileSheet: View {
     let onLogout: () -> Void
     @State private var showLogoutConfirm = false
 
-    // ✅ Fix alert (no usar .constant)
     @State private var showErrorAlert = false
-
-    // ✅ Privacy picker (action sheet)
     @State private var showPrivacyPicker = false
 
     var body: some View {
@@ -55,8 +52,6 @@ struct ProfileSheet: View {
             )
             .shadow(color: Color.black.opacity(0.55), radius: 24, x: 0, y: 14)
             .transition(.scale.combined(with: .opacity))
-
-            // ✅ Absorbe taps dentro del modal para que NO llegue al fondo
             .contentShape(Rectangle())
             .onTapGesture { }
         }
@@ -67,6 +62,9 @@ struct ProfileSheet: View {
         }
         .onChange(of: vm.pickedAvatarItem) { _ in
             Task { await vm.onPickedAvatarChanged() }
+        }
+        .onChange(of: vm.pickedCoverItem) { _ in
+            Task { await vm.onPickedCoverChanged() }
         }
         .onChange(of: vm.errorMessage) { newValue in
             showErrorAlert = (newValue != nil)
@@ -128,6 +126,8 @@ struct ProfileSheet: View {
     private var profileCard: some View {
         VStack(alignment: .leading, spacing: 12) {
 
+            coverSection
+
             HStack(spacing: 12) {
                 avatarBig
 
@@ -148,7 +148,7 @@ struct ProfileSheet: View {
                         if vm.isUploadingAvatar {
                             SwiftUI.ProgressView().tint(Color.appGreen.opacity(0.95))
                         }
-                        Text("Cambiar foto")
+                        Text(vm.isUploadingAvatar ? "Subiendo..." : "Cambiar foto")
                             .font(.system(size: 12, weight: .heavy, design: .rounded))
                             .foregroundColor(Color.appGreen.opacity(0.95))
                     }
@@ -164,6 +164,7 @@ struct ProfileSheet: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(vm.isUploadingAvatar)
             }
 
             Divider().overlay(Color.white.opacity(0.10))
@@ -184,7 +185,6 @@ struct ProfileSheet: View {
                 )
             }
 
-            // ✅ Privacidad del perfil (botón que abre opciones)
             privacySection
 
             Button {
@@ -209,6 +209,79 @@ struct ProfileSheet: View {
         }
         .padding(14)
         .background(cardBackground)
+    }
+
+    private var coverSection: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let ui = vm.coverPreviewImage {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .scaledToFill()
+                } else if
+                    let urlStr = vm.profile?.coverUrl,
+                    urlStr.lowercased().hasPrefix("http"),
+                    let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        case .failure:
+                            fallbackCover
+                        case .empty:
+                            fallbackCover.opacity(0.7)
+                        @unknown default:
+                            fallbackCover
+                        }
+                    }
+                } else {
+                    fallbackCover
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 150)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.08),
+                        Color.black.opacity(0.18),
+                        Color.black.opacity(0.35)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+
+            PhotosPicker(selection: $vm.pickedCoverItem, matching: .images) {
+                HStack(spacing: 8) {
+                    if vm.isUploadingCover {
+                        SwiftUI.ProgressView().tint(.white)
+                    }
+                    Text(vm.isUploadingCover ? "Subiendo..." : "Cambiar portada")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white.opacity(0.95))
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.black.opacity(0.34))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.isUploadingCover)
+            .padding(10)
+        }
     }
 
     private var privacySection: some View {
@@ -302,21 +375,21 @@ struct ProfileSheet: View {
                 let urlStr = vm.profile?.avatarUrl,
                 urlStr.lowercased().hasPrefix("http"),
                 let url = URL(string: urlStr) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .failure:
-                            fallbackAvatar
-                        case .empty:
-                            fallbackAvatar.opacity(0.6)
-                        @unknown default:
-                            fallbackAvatar
-                        }
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                    case .failure:
+                        fallbackAvatar
+                    case .empty:
+                        fallbackAvatar.opacity(0.6)
+                    @unknown default:
+                        fallbackAvatar
                     }
-                } else {
-                    fallbackAvatar
                 }
+            } else {
+                fallbackAvatar
+            }
         }
         .frame(width: 56, height: 56)
         .clipShape(Circle())
@@ -329,6 +402,17 @@ struct ProfileSheet: View {
             Image(systemName: "person.fill")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.white.opacity(0.65))
+        }
+    }
+
+    private var fallbackCover: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+
+            Image(systemName: "photo")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundColor(.white.opacity(0.18))
         }
     }
 
@@ -368,14 +452,7 @@ struct ProfileSheet: View {
     private func requestRow(_ u: UserProfile) -> some View {
         HStack(spacing: 12) {
 
-            ZStack {
-                Circle().fill(Color.white.opacity(0.10))
-                Image(systemName: "person.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white.opacity(0.65))
-            }
-            .frame(width: 40, height: 40)
-            .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
+            requestAvatar(u.avatarUrl)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(u.displayName)
@@ -424,6 +501,41 @@ struct ProfileSheet: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
+    }
+
+    private func requestAvatar(_ urlString: String?) -> some View {
+        Group {
+            if let urlString,
+               urlString.lowercased().hasPrefix("http"),
+               let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        smallFallbackAvatar
+                    case .empty:
+                        smallFallbackAvatar.opacity(0.6)
+                    @unknown default:
+                        smallFallbackAvatar
+                    }
+                }
+            } else {
+                smallFallbackAvatar
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    private var smallFallbackAvatar: some View {
+        ZStack {
+            Circle().fill(Color.white.opacity(0.10))
+            Image(systemName: "person.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.white.opacity(0.65))
+        }
     }
 
     // MARK: - Logout

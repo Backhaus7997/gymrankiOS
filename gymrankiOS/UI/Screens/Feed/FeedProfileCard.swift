@@ -1,3 +1,8 @@
+//
+//  FeedProfileCard.swift
+//  gymrankiOS
+//
+
 import SwiftUI
 
 struct FeedProfileCard: View {
@@ -5,7 +10,7 @@ struct FeedProfileCard: View {
     let item: FeedProfileItem
     let myUid: String
 
-    let status: FriendStatus?          // nil => no relación
+    let status: FriendStatus?
     let onAddFriend: () -> Void
     let onOpenRoutine: (FeedRoutinePreview) -> Void
 
@@ -13,7 +18,7 @@ struct FeedProfileCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            headerPlaceholder
+            headerImage
             authorRow
             lastRoutineSection
             moreButtonSection
@@ -29,24 +34,41 @@ struct FeedProfileCard: View {
         }
     }
 
-    // MARK: - Header (placeholder)
-    private var headerPlaceholder: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .frame(height: 180)
+    // MARK: - Header
 
-            LinearGradient(
-                colors: [Color.black.opacity(0.35), Color.clear],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    private var headerImage: some View {
+        Group {
+            if let urlStr = item.profile.coverUrl,
+               let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty:
+                        fallbackHeader
+                    case .failure:
+                        fallbackHeader
+                    @unknown default:
+                        fallbackHeader
+                    }
+                }
+            } else {
+                fallbackHeader
+            }
         }
+        .frame(height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var fallbackHeader: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color.white.opacity(0.06))
     }
 
     // MARK: - Author row + botón
+
     private var authorRow: some View {
         HStack(spacing: 10) {
             avatar
@@ -106,22 +128,48 @@ struct FeedProfileCard: View {
     }
 
     private var avatar: some View {
+        Group {
+            if let urlStr = item.profile.avatarUrl,
+               let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty:
+                        fallbackAvatar.opacity(0.65)
+                    case .failure:
+                        fallbackAvatar
+                    @unknown default:
+                        fallbackAvatar
+                    }
+                }
+            } else {
+                fallbackAvatar
+            }
+        }
+        .frame(width: 42, height: 42)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    private var fallbackAvatar: some View {
         ZStack {
             Circle().fill(Color.white.opacity(0.10))
             Image(systemName: "person.fill")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(.white.opacity(0.65))
         }
-        .frame(width: 42, height: 42)
-        .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
     }
 
-    // MARK: - Solo el ÚLTIMO entrenamiento
+    // MARK: - Solo el último entrenamiento
+
     private var lastRoutineSection: some View {
         Group {
             if let last = item.latestRoutines.first {
                 Button {
-                    onOpenRoutine(last) // si no querés que abra nada al tocar, decime y lo saco
+                    onOpenRoutine(last)
                 } label: {
                     routineCard(last)
                 }
@@ -135,7 +183,8 @@ struct FeedProfileCard: View {
         }
     }
 
-    // MARK: - Ver más entrenamientos (única CTA)
+    // MARK: - Ver más entrenamientos
+
     private var moreButtonSection: some View {
         Group {
             if item.latestRoutines.count > 1 {
@@ -151,7 +200,8 @@ struct FeedProfileCard: View {
         }
     }
 
-    // MARK: - Routine card (preview)
+    // MARK: - Routine card
+
     private func routineCard(_ r: FeedRoutinePreview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
 

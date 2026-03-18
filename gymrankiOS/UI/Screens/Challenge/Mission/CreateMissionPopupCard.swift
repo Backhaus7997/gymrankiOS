@@ -31,15 +31,15 @@ struct CenterModalOverlay<Content: View>: View {
 // MARK: - Draft model (lo que sale del wizard)
 
 struct MissionDraft: Hashable {
-    let durationDays: Int           // 14 / 21 / 28
+    let durationDays: Int
     let focus: CreateMissionPopupCard.Focus
 
-    let goalWorkouts: Int           // objetivo sugerido (workouts)
-    let points: Int                 // 250 / 350 / 500
+    let goalWorkouts: Int
+    let points: Int
 
     let title: String
     let subtitle: String
-    let level: String               // derivado por duración
+    let level: String
     let tags: [String]
 }
 
@@ -383,7 +383,7 @@ struct CreateMissionPopupCard: View {
                 InfoCard(
                     icon: "target",
                     title: "Objetivo",
-                    value: "\(goal) entrenos"
+                    value: "\(goal) semanas"
                 )
                 InfoCard(
                     icon: "star.fill",
@@ -508,9 +508,9 @@ struct CreateMissionPopupCard: View {
 
     private func goalWorkoutsFor(duration: Duration) -> Int {
         switch duration {
-        case .d14: return 10
-        case .d21: return 15
-        case .d28: return 20
+        case .d14: return 2
+        case .d21: return 3
+        case .d28: return 4
         }
     }
 }
@@ -649,7 +649,7 @@ private struct InfoCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
 
                 Text(value)

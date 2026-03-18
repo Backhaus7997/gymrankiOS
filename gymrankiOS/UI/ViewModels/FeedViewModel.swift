@@ -21,7 +21,6 @@ final class FeedViewModel: ObservableObject {
     @Published var isLoadingFriends: Bool = false
     @Published var errorMessageFriends: String? = nil
 
-    // 🔥 Estado local para el botón (AGREGAR / PENDIENTE / AMIGOS / BLOQUEADO)
     @Published private(set) var relationByUid: [String: FriendStatus] = [:]
 
     private let feedRepo: FeedRepository
@@ -133,7 +132,7 @@ final class FeedViewModel: ObservableObject {
 
         do {
             try await friendRepo.sendRequest(myUid: me, to: other)
-            relationByUid[other] = .requested // ✅ actualizar UI instantáneo
+            relationByUid[other] = .requested
         } catch {
             errorMessagePublic = error.localizedDescription
         }

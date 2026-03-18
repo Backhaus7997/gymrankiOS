@@ -35,7 +35,6 @@ struct ChallengeDetailView: View {
 
                     tagsSection
 
-                    // espacio para que el contenido no quede debajo del footer
                     Spacer().frame(height: 90)
                 }
                 .padding(.horizontal, 16)
@@ -145,7 +144,7 @@ struct ChallengeDetailView: View {
         )
     }
 
-    // MARK: - Tags
+    // MARK: - Tags (WRAP / FLOW)
 
     private var tagsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -158,8 +157,7 @@ struct ChallengeDetailView: View {
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.45))
             } else {
-                let cols = [GridItem(.adaptive(minimum: 84), spacing: 10)]
-                LazyVGrid(columns: cols, alignment: .leading, spacing: 10) {
+                TagWrapLayout(spacing: 10, lineSpacing: 10) {
                     ForEach(template.tags, id: \.self) { t in
                         TagPill(text: t)
                     }
@@ -169,11 +167,98 @@ struct ChallengeDetailView: View {
         .padding(.top, 4)
     }
 
+    // MARK: - Tag pill
+
+    private struct TagPill: View {
+        let text: String
+
+        var body: some View {
+            Text(text)
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.92))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule()
+                        .fill(Color.appGreen.opacity(0.18))
+                        .overlay(Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1))
+                )
+        }
+    }
+
+    // MARK: - Flow layout (iOS 16+)
+
+    private struct TagWrapLayout: Layout {
+        var spacing: CGFloat = 10
+        var lineSpacing: CGFloat = 10
+
+        func sizeThatFits(
+            proposal: ProposedViewSize,
+            subviews: Subviews,
+            cache: inout ()
+        ) -> CGSize {
+            let maxWidth = proposal.width ?? 10_000
+
+            var x: CGFloat = 0
+            var y: CGFloat = 0
+            var rowHeight: CGFloat = 0
+
+            for sub in subviews {
+                let size = sub.sizeThatFits(.unspecified)
+
+                if x > 0, x + size.width > maxWidth {
+                    // nueva fila
+                    x = 0
+                    y += rowHeight + lineSpacing
+                    rowHeight = 0
+                }
+
+                x += size.width + spacing
+                rowHeight = max(rowHeight, size.height)
+            }
+
+            return CGSize(width: proposal.width ?? maxWidth, height: y + rowHeight)
+        }
+
+        func placeSubviews(
+            in bounds: CGRect,
+            proposal: ProposedViewSize,
+            subviews: Subviews,
+            cache: inout ()
+        ) {
+            let maxWidth = bounds.width
+
+            var x: CGFloat = 0
+            var y: CGFloat = 0
+            var rowHeight: CGFloat = 0
+
+            for sub in subviews {
+                let size = sub.sizeThatFits(.unspecified)
+
+                if x > 0, x + size.width > maxWidth {
+                    // nueva fila
+                    x = 0
+                    y += rowHeight + lineSpacing
+                    rowHeight = 0
+                }
+
+                sub.place(
+                    at: CGPoint(x: bounds.minX + x, y: bounds.minY + y),
+                    proposal: ProposedViewSize(width: size.width, height: size.height)
+                )
+
+                x += size.width + spacing
+                rowHeight = max(rowHeight, size.height)
+            }
+        }
+    }
+
     // MARK: - Footer join (fijo abajo)
 
     private var footerJoin: some View {
         VStack(spacing: 10) {
-            // separador visual suave
             Rectangle()
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 1)
@@ -260,24 +345,5 @@ struct ChallengeDetailView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-}
-
-// MARK: - Tag pill
-
-private struct TagPill: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: .heavy, design: .rounded))
-            .foregroundColor(.white.opacity(0.92))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(
-                Capsule()
-                    .fill(Color.appGreen.opacity(0.18))
-                    .overlay(Capsule().stroke(Color.appGreen.opacity(0.55), lineWidth: 1))
-            )
     }
 }

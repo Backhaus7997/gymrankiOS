@@ -40,8 +40,8 @@ struct HomeView: View {
                 Spacer().frame(height: 24)
 
                 HStack(spacing: 0) {
-                    Text("FIT").foregroundColor(.white)
-                    Text("RANK").foregroundColor(.appGreen)
+                    Text("TRE").foregroundColor(.white)
+                    Text("INO").foregroundColor(.appGreen)
                 }
                 .font(.system(size: 44, weight: .heavy))
                 .tracking(1)

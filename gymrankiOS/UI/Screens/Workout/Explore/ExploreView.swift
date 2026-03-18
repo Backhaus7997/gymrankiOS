@@ -5,6 +5,30 @@
 
 import SwiftUI
 import FirebaseFirestore
+import UIKit
+
+// MARK: - Asset images helper (explore_1 ... explore_N)
+
+private enum ExploreAssetImages {
+    static let prefix = "explore_"
+    static let count = 8   // 👈 poné acá cuántas imágenes tenés: explore_1...explore_8
+
+    static func name(forKey key: String) -> String {
+        let idx = stableIndex(from: key, modulo: count) + 1
+        return "\(prefix)\(idx)"
+    }
+
+    /// Hash estable (no uses `hashValue` porque puede cambiar entre ejecuciones)
+    private static func stableIndex(from s: String, modulo: Int) -> Int {
+        let m = max(1, modulo)
+        var hash: UInt64 = 1469598103934665603 // FNV-1a offset basis
+        for b in s.utf8 {
+            hash ^= UInt64(b)
+            hash &*= 1099511628211
+        }
+        return Int(hash % UInt64(m))
+    }
+}
 
 // MARK: - ViewModel
 
@@ -237,15 +261,11 @@ struct ExploreView: View {
                         frequency: "\(t.frequencyPerWeek)x/sem",
                         level: t.level,
                         isPro: t.isPro,
-                        imageName: imageName(for: t)
+                        imageName: imageName(for: t)   // ✅ siempre trae "explore_X"
                     )
-                    // ✅ Hace que TODA la card sea tappable, incluso zonas “vacías”
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .simultaneousGesture(TapGesture().onEnded {
-                    print("OPEN TEMPLATE:", t.id, "| title:", t.title)
-                })
             }
 
             if filteredTemplates.isEmpty {
@@ -313,15 +333,14 @@ struct ExploreView: View {
         return out.filter { seen.insert($0).inserted }
     }
 
+    /// ✅ Siempre devuelve una imagen del estilo "explore_3"
     private func imageName(for t: WorkoutTemplate) -> String? {
-        let lower = t.title.lowercased()
-        if lower.contains("candito") { return "program1" }
-        if lower.contains("juggernaut") { return "program2" }
-        return nil
+        // si querés que cambie por “tab”, podés concatenar selectedTab.visibilityValue también
+        return ExploreAssetImages.name(forKey: t.id)
     }
 }
 
-// MARK: - Program Card (incluida acá para que exista)
+// MARK: - Program Card
 
 private struct ExploreProgramCard: View {
 
@@ -391,8 +410,11 @@ private struct ExploreProgramCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.white.opacity(0.06))
 
-            if let name = imageName {
-                Image(name)
+            if
+                let name = imageName,
+                let ui = UIImage(named: name)
+            {
+                Image(uiImage: ui)
                     .resizable()
                     .scaledToFill()
                     .frame(height: 78)

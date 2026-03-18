@@ -19,7 +19,8 @@ struct UserProfile: Identifiable, Codable, Equatable {
     var username: String?
     var fullName: String?
     var avatarUrl: String?
-
+    var coverUrl: String?
+    
     /// Nivel (si lo usás). Default 1
     var level: Int
 
@@ -50,6 +51,7 @@ struct UserProfile: Identifiable, Codable, Equatable {
         username: String? = nil,
         fullName: String? = nil,
         avatarUrl: String? = nil,
+        coverUrl: String? = nil,
         level: Int = 1,
 
         // legacy
@@ -76,6 +78,7 @@ struct UserProfile: Identifiable, Codable, Equatable {
         self.username = username
         self.fullName = fullName
         self.avatarUrl = avatarUrl
+        self.coverUrl = coverUrl
         self.level = level
 
         self.score = score
@@ -132,6 +135,7 @@ extension UserProfile {
         let subtitle = (data["subtitle"] as? String) ?? (data["experience"] as? String)
 
         let avatarUrl = (data["avatarUrl"] as? String) ?? (data["photoUrl"] as? String)
+        let coverUrl = (data["coverUrl"] as? String) ?? (data["coverURL"] as? String)
 
         let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
         let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
@@ -141,6 +145,7 @@ extension UserProfile {
             username: username,
             fullName: fullName,
             avatarUrl: avatarUrl,
+            coverUrl: coverUrl,
             level: level,
 
             score: legacyScore,

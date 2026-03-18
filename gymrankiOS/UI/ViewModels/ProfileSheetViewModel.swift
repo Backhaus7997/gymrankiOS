@@ -34,24 +34,29 @@ final class ProfileSheetViewModel: ObservableObject {
     @Published var avatarPreviewImage: UIImage? = nil
     @Published var isUploadingAvatar: Bool = false
 
+    // Cover
+    @Published var pickedCoverItem: PhotosPickerItem? = nil
+    @Published var coverPreviewImage: UIImage? = nil
+    @Published var isUploadingCover: Bool = false
+
     // Privacidad
     @Published var selectedFeedVisibility: FeedVisibility = .public
     @Published var isUpdatingPrivacy: Bool = false
 
     private let userRepo: UserRepository
     private let friendsRepo: FriendsRepository
-    private let avatarStorage: AvatarStorageService
+    private let imageService: ProfileImageService
 
     private var myUid: String = ""
 
     init(
         userRepo: UserRepository = .shared,
         friendsRepo: FriendsRepository = .shared,
-        avatarStorage: AvatarStorageService = .shared
+        imageService: ProfileImageService = .shared
     ) {
         self.userRepo = userRepo
         self.friendsRepo = friendsRepo
-        self.avatarStorage = avatarStorage
+        self.imageService = imageService
     }
 
     func load(myUid: String) async {
@@ -65,7 +70,6 @@ final class ProfileSheetViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            // 1) Perfil
             if let p = try await userRepo.fetchUserProfile(uid: uid) {
                 profile = p
                 fullName = p.fullName ?? ""
@@ -74,7 +78,6 @@ final class ProfileSheetViewModel: ObservableObject {
                 selectedFeedVisibility = p.feedVisibility
             }
 
-            // 2) Relaciones para requests entrantes
             let relations = try await friendsRepo.fetchRelations(myUid: uid)
 
             let incomingIds = relations
@@ -141,33 +144,62 @@ final class ProfileSheetViewModel: ObservableObject {
         guard let item = pickedAvatarItem else { return }
 
         do {
-            if let data = try await item.loadTransferable(type: Data.self) {
-                avatarPreviewImage = UIImage(data: data)
-                await uploadAvatar(data: data)
+            if let data = try await item.loadTransferable(type: Data.self),
+               let image = UIImage(data: data) {
+                avatarPreviewImage = image
+                await uploadAvatar(image: image)
             }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
-
-    private func uploadAvatar(data: Data) async {
+    
+    private func uploadAvatar(image: UIImage) async {
         guard !myUid.isEmpty else { return }
 
         isUploadingAvatar = true
         defer { isUploadingAvatar = false }
 
         do {
-            let finalData: Data
-            if let ui = UIImage(data: data),
-               let jpg = ui.jpegData(compressionQuality: 0.80) {
-                finalData = jpg
-            } else {
-                finalData = data
+            _ = try await imageService.uploadProfileImage(
+                image: image,
+                kind: .avatar,
+                uid: myUid
+            )
+            await load(myUid: myUid)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Cover upload
+
+    func onPickedCoverChanged() async {
+        guard let item = pickedCoverItem else { return }
+
+        do {
+            if let data = try await item.loadTransferable(type: Data.self),
+               let image = UIImage(data: data) {
+                coverPreviewImage = image
+                await uploadCover(image: image)
             }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 
-            let urlString = try await avatarStorage.uploadAvatar(uid: myUid, imageData: finalData)
-            try await userRepo.updateAvatarUrl(uid: myUid, avatarUrl: urlString)
+    private func uploadCover(image: UIImage) async {
+        guard !myUid.isEmpty else { return }
 
+        isUploadingCover = true
+        defer { isUploadingCover = false }
+
+        do {
+            _ = try await imageService.uploadProfileImage(
+                image: image,
+                kind: .cover,
+                uid: myUid
+            )
             await load(myUid: myUid)
         } catch {
             errorMessage = error.localizedDescription

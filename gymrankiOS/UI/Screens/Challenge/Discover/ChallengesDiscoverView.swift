@@ -32,7 +32,6 @@ final class ChallengesDiscoverVM: ObservableObject {
             self.templates = activeTemplates
             self.joinedActiveTemplateIds = Set(activeUserChallenges.map { $0.templateId })
 
-            // Traigo TODOS los challenges del usuario (para filtrar Discover y armar biblioteca)
             let allUserChallenges = try await repo.fetchUserChallenges(uid: uid, onlyActive: false)
             self.joinedTemplateIds = Set(allUserChallenges.map { $0.templateId })
 
@@ -66,7 +65,6 @@ struct ChallengesDiscoverView: View {
 
     private var uid: String { session.userId }
 
-    /// ✅ Base list según segmento + filtro para que Discover no muestre los ya agregados
     private var baseList: [ChallengeTemplate] {
         switch selected {
         case .discover:
@@ -117,7 +115,6 @@ struct ChallengesDiscoverView: View {
                         ForEach(filtered, id: \.self) { item in
                             ChallengeCard(
                                 template: item,
-                                /// En biblioteca puede que sea completed/cancelled; igualmente “ya lo tiene”
                                 isInLibrary: vm.joinedTemplateIds.contains(item.id),
                                 isActive: vm.joinedActiveTemplateIds.contains(item.id)
                             ) {
@@ -148,7 +145,6 @@ struct ChallengesDiscoverView: View {
         .navigationDestination(item: $selectedTemplate) { tpl in
             ChallengeDetailView(
                 template: tpl,
-                /// ✅ Deshabilita “Unirme” si YA lo agregó alguna vez
                 isJoined: vm.joinedTemplateIds.contains(tpl.id),
                 onJoined: {
                     Task {
@@ -282,7 +278,6 @@ private struct ChallengeCard: View {
                             Text("🔥").font(.system(size: 16))
                         }
 
-                        // Badge “ya lo tiene”
                         if isInLibrary {
                             Image(systemName: isActive ? "checkmark.seal.fill" : "checkmark.circle.fill")
                                 .foregroundColor(Color.appGreen.opacity(0.95))
